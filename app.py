@@ -588,7 +588,7 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
             legend=dict(orientation="h", y=1.12),
             margin=dict(t=40, b=40),
         )
-        st.plotly_chart(fig_ta, use_container_width=True)
+        st.plotly_chart(fig_ta, width='stretch')
     else:
         st.info("Upload 'Copy of Report' file to see this chart.")
 
@@ -610,7 +610,7 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(t=20, b=20), legend_title="Product",
         )
-        st.plotly_chart(fig_trend, use_container_width=True)
+        st.plotly_chart(fig_trend, width='stretch')
 
     # Jan vs Feb grouped bar alongside
     if not jan.empty and not feb.empty:
@@ -625,7 +625,7 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(t=20, b=40), xaxis_tickangle=-30,
         )
-        st.plotly_chart(fig_cmp, use_container_width=True)
+        st.plotly_chart(fig_cmp, width='stretch')
 
     st.markdown("---")
 
@@ -663,7 +663,7 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(t=40, b=20),
         )
-        st.plotly_chart(fig_dist, use_container_width=True)
+        st.plotly_chart(fig_dist, width='stretch')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -725,7 +725,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             xaxis_title=f"Amount ({unit})", margin=dict(l=160, t=20, b=20),
         )
-        st.plotly_chart(fig_doc, use_container_width=True)
+        st.plotly_chart(fig_doc, width='stretch')
     st.markdown("---")
 
     # ── Spend by Activity Type (donut) ──
@@ -745,7 +745,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                 showlegend=True, margin=dict(t=20, b=20),
             )
-            st.plotly_chart(fig_donut, use_container_width=True)
+            st.plotly_chart(fig_donut, width='stretch')
 
     with col2:
         # Spend by Responsible MR
@@ -763,7 +763,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                 margin=dict(t=20, b=40), xaxis_tickangle=-30, showlegend=False,
             )
-            st.plotly_chart(fig_mr, use_container_width=True)
+            st.plotly_chart(fig_mr, width='stretch')
 
     st.markdown("---")
 
@@ -790,10 +790,10 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
         }
         st.dataframe(
             display.rename(columns=show_cols)[[v for v in show_cols.values()]],
-            use_container_width=True, hide_index=True,
+            width='stretch', hide_index=True,
         )
     elif not ae.empty:
-        st.dataframe(ae, use_container_width=True, hide_index=True)
+        st.dataframe(ae, width='stretch', hide_index=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -881,7 +881,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
             xaxis_tickangle=-15, margin=dict(t=20, b=60),
             legend=dict(orientation="h", y=1.1),
         )
-        st.plotly_chart(fig_cmp, use_container_width=True)
+        st.plotly_chart(fig_cmp, width='stretch')
     else:
         st.info("Upload Visit Tracker to see verified vs reported calls.")
 
@@ -903,7 +903,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                 margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20,
             )
-            st.plotly_chart(fig_sp, use_container_width=True)
+            st.plotly_chart(fig_sp, width='stretch')
         else:
             st.info("No MR spend data available.")
 
@@ -921,7 +921,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20,
         )
-        st.plotly_chart(fig_conv, use_container_width=True)
+        st.plotly_chart(fig_conv, width='stretch')
 
     st.markdown("---")
 
@@ -946,7 +946,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
     }
     st.dataframe(
         summary[cols_show].rename(columns=rename_map),
-        use_container_width=True, hide_index=True,
+        width='stretch', hide_index=True,
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -997,7 +997,7 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                              legend=dict(orientation="h", y=1.12),
                              margin=dict(t=40, b=60), xaxis_tickangle=-25)
-        st.plotly_chart(fig_ta, use_container_width=True)
+        st.plotly_chart(fig_ta, width='stretch')
     else:
         st.info("Upload 'Copy of Report' file to see this chart.")
 
@@ -1015,7 +1015,7 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
         fig_trend.update_traces(line_width=2.5)
         fig_trend.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                 margin=dict(t=20, b=20))
-        st.plotly_chart(fig_trend, use_container_width=True)
+        st.plotly_chart(fig_trend, width='stretch')
 
         # Grouped bar version
         st.subheader("📊 Jan vs Feb Sales Comparison (Units)")
@@ -1028,7 +1028,7 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
                               plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                               margin=dict(t=20, b=60), xaxis_tickangle=-25,
                               legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(fig_cmp, use_container_width=True)
+        st.plotly_chart(fig_cmp, width='stretch')
 
     st.markdown("---")
 
@@ -1052,7 +1052,7 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
         fig_dist.update_layout(template=TEMPLATE, height=600,
                                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=50, b=20))
-        st.plotly_chart(fig_dist, use_container_width=True)
+        st.plotly_chart(fig_dist, width='stretch')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1106,7 +1106,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
                               xaxis_title=f"Amount ({unit})",
                               margin=dict(l=180, t=20, b=20),
                               legend=dict(orientation="h", y=1.05))
-        st.plotly_chart(fig_doc, use_container_width=True)
+        st.plotly_chart(fig_doc, width='stretch')
     st.markdown("---")
 
     # Spend by Activity Type (donut) + by MR
@@ -1123,7 +1123,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
             fig_donut.update_traces(textposition="outside", textinfo="percent+label")
             fig_donut.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                     margin=dict(t=20, b=20), showlegend=False)
-            st.plotly_chart(fig_donut, use_container_width=True)
+            st.plotly_chart(fig_donut, width='stretch')
     with col2:
         st.markdown("**By Responsible MR**")
         if not ae.empty:
@@ -1137,7 +1137,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
             fig_mr.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                  margin=dict(t=20, b=60), xaxis_tickangle=-30,
                                  showlegend=False)
-            st.plotly_chart(fig_mr, use_container_width=True)
+            st.plotly_chart(fig_mr, width='stretch')
     st.markdown("---")
 
     # Data table
@@ -1157,7 +1157,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
                       "Products","Planned","Actual","Responsible"]].rename(columns={
                 "Planned": f"Planned ({unit})", "Actual": f"Actual ({unit})",
                 "Responsible": "MR"}),
-            use_container_width=True, hide_index=True)
+            width='stretch', hide_index=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1230,7 +1230,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
                               plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                               xaxis_tickangle=-15, margin=dict(t=20, b=60),
                               legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(fig_cmp, use_container_width=True)
+        st.plotly_chart(fig_cmp, width='stretch')
     else:
         st.info("Upload Visit Tracker to see verified calls.")
     st.markdown("---")
@@ -1246,7 +1246,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
                             labels={"Spend": f"({unit})"})
             fig_sp.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                  margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20)
-            st.plotly_chart(fig_sp, use_container_width=True)
+            st.plotly_chart(fig_sp, width='stretch')
         else:
             st.info("No MR spend data.")
 
@@ -1258,7 +1258,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
                           labels={"DrsConverted": "Converted", "Delegate": "MR"})
         fig_conv.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20)
-        st.plotly_chart(fig_conv, use_container_width=True)
+        st.plotly_chart(fig_conv, width='stretch')
     st.markdown("---")
 
     # Summary table
@@ -1274,7 +1274,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
             "Delegate":"MR","TotalCalls":"Total Calls","Prescriber":"Prescriber Calls",
             "DrsConverted":"Drs Converted","DaysWorked":"Days Worked",
             "Spend": f"Spend ({unit})"}),
-        use_container_width=True, hide_index=True)
+        width='stretch', hide_index=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 4 — CM SPEND
@@ -1324,7 +1324,7 @@ def render_tab4(expense_data, monthly_data, currency):
         fig_flow.update_layout(template=TEMPLATE, height=340,
                                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=20, b=20), yaxis_title=f"Amount ({unit})")
-        st.plotly_chart(fig_flow, use_container_width=True)
+        st.plotly_chart(fig_flow, width='stretch')
 
     # Cumulative Spend Line Chart
     with col2:
@@ -1343,7 +1343,7 @@ def render_tab4(expense_data, monthly_data, currency):
                 fig_cum.update_traces(line_color=CLR_TEAL, line_width=2.5)
                 fig_cum.update_layout(plot_bgcolor="rgba(0,0,0,0)",
                                       paper_bgcolor="rgba(0,0,0,0)", margin=dict(t=20, b=20))
-                st.plotly_chart(fig_cum, use_container_width=True)
+                st.plotly_chart(fig_cum, width='stretch')
             else:
                 st.info("No date-stamped data available for cumulative chart.")
         else:
@@ -1384,7 +1384,7 @@ def render_tab4(expense_data, monthly_data, currency):
                            yaxis_title=f"Amount ({unit})",
                            legend=dict(orientation="h", y=1.1),
                            margin=dict(t=30, b=20))
-    st.plotly_chart(fig_stk, use_container_width=True)
+    st.plotly_chart(fig_stk, width='stretch')
     st.markdown("---")
 
     # CM-level activity table
@@ -1396,7 +1396,7 @@ def render_tab4(expense_data, monthly_data, currency):
             st.dataframe(
                 cm_df[["Doctor","Hospital","Speciality","Activity","Products","Amount","Responsible"]]\
                     .rename(columns={"Amount": f"Amount ({unit})"}),
-                use_container_width=True, hide_index=True)
+                width='stretch', hide_index=True)
         else:
             st.info("No CM-direct entries found.")
     st.markdown("---")
@@ -1409,7 +1409,7 @@ def render_tab4(expense_data, monthly_data, currency):
         st.dataframe(
             oe_display[["Country","Details","Amount","Comments","Category"]]\
                 .rename(columns={"Amount": f"Amount ({unit})"}),
-            use_container_width=True, hide_index=True)
+            width='stretch', hide_index=True)
     else:
         st.info("No other expense data.")
 
@@ -1450,7 +1450,7 @@ def render_tab5(visit_data):
         )
         fig_hm.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                              margin=dict(t=50, b=20))
-        st.plotly_chart(fig_hm, use_container_width=True)
+        st.plotly_chart(fig_hm, width='stretch')
 
     # Daily visit count line chart
     st.subheader("📈 Daily Visit Count — Feb 2026")
@@ -1462,7 +1462,7 @@ def render_tab5(visit_data):
         fig_line.update_traces(line_width=2.5)
         fig_line.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=20, b=20), legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(fig_line, use_container_width=True)
+        st.plotly_chart(fig_line, width='stretch')
     st.markdown("---")
 
     # Detail table
@@ -1472,7 +1472,7 @@ def render_tab5(visit_data):
         show["Visit_Date"] = show["Visit_Date"].dt.strftime("%d-%b-%Y")
         show = show.sort_values(["MR","Visit_Date"])
         st.dataframe(show.rename(columns={"Visit_Date": "Visit Date"}),
-                     use_container_width=True, hide_index=True)
+                     width='stretch', hide_index=True)
     else:
         st.info("No visits found for the selected MR in February 2026.")
 
