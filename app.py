@@ -11,6 +11,17 @@ from plotly.subplots import make_subplots
 import numpy as np
 import re
 from io import BytesIO
+from name_map import (
+    normalize_mr, mr_display_name, MR_CANONICAL,
+    normalize_product, product_display_name, product_category,
+    normalize_activity, activity_display_name,
+    normalize_territory, territory_display_name,
+    normalize_doctor, build_doctor_index,
+    normalize_distributor, distributor_display_name,
+)
+
+# IDs that are NOT field MRs — exclude from MR Performance tab
+_NON_MR_IDS = {"MR_006", "AGT_001", "UNKNOWN"}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS
@@ -301,16 +312,24 @@ def load_expense(file_bytes: bytes) -> dict:
         sn = row.iloc[0]
         if not isinstance(sn, (int, float)) or pd.isna(sn):
             continue
+        raw_resp = str(row.iloc[8]).strip()
+        # Resolve joint entries like "JITENDRA/CLEMANCE" → ["MR_006", "MR_002"]
+        if "/" in raw_resp:
+            mr_ids = ",".join(normalize_mr(p.strip()) for p in raw_resp.split("/"))
+        else:
+            mr_ids = normalize_mr(raw_resp)
         ae_rows.append({
             "SN": int(sn),
             "Doctor": str(row.iloc[1]).strip(),
             "Hospital": str(row.iloc[2]).strip(),
             "Speciality": str(row.iloc[3]).strip(),
             "Activity": str(row.iloc[4]).strip(),
+            "Activity_ID": normalize_activity(str(row.iloc[4]).strip()),
             "Products": str(row.iloc[5]).strip(),
             "Amount_FCFA": safe_num(row.iloc[6]),
             "Contact": str(row.iloc[7]).strip(),
-            "Responsible": str(row.iloc[8]).strip(),
+            "Responsible": raw_resp,
+            "MR_IDs": mr_ids,  # normalized, comma-sep for joint entries
         })
     ae_df = pd.DataFrame(ae_rows)
 
@@ -409,68 +428,72 @@ def load_monthly_reports(file_bytes: bytes) -> dict:
 
 
 @st.cache_data(show_spinner=False)
-def load_visit_tracker(file_bytes: bytes) -> pd.DataFrame:
+def load_visit_tracker(files_and_months: list) -> pd.DataFrame:
     """
-    Flatten all MR sheets → DataFrame: MR, Doctor, Speciality, Clinic, Visit_Date
+    files_and_months: list of (file_bytes, month_label) tuples e.g. [(bytes,'Feb'), (bytes,'Mar')]
+    Returns flat DataFrame: MR_ID, MR, Doctor, Speciality, Clinic, Visit_Date, Month
     """
-    xl = pd.ExcelFile(BytesIO(file_bytes))
     all_rows = []
-    for sheet in xl.sheet_names:
-        raw = pd.read_excel(xl, sheet_name=sheet, header=None)
-        # MR name from cell C1 (row 0, col 2)
-        try:
-            mr_name = str(raw.iloc[0, 2]).strip()
-        except Exception:
-            mr_name = sheet
-        if not mr_name or mr_name.upper() in ("NAN", ""):
-            mr_name = sheet
+    for file_bytes, month_label in files_and_months:
+        xl = pd.ExcelFile(BytesIO(file_bytes))
+        for sheet in xl.sheet_names:
+            raw = pd.read_excel(xl, sheet_name=sheet, header=None)
+            try:
+                mr_name = str(raw.iloc[0, 2]).strip()
+            except Exception:
+                mr_name = sheet
+            if not mr_name or mr_name.upper() in ("NAN", ""):
+                mr_name = sheet
+            mr_id = normalize_mr(mr_name)
 
-        # header row is row index 3 (0-based)
-        header_row = raw.iloc[3]
-        visit_cols = [
-            c for c in raw.columns
-            if "visit" in str(header_row[c]).lower()
-        ]
-        doc_col = next(
-            (c for c in raw.columns if "NOM" in str(header_row[c]).upper()), None
-        )
-        spec_col = next(
-            (c for c in raw.columns if "SPEC" in str(header_row[c]).upper()), None
-        )
-        clinic_col = next(
-            (c for c in raw.columns if "CLINIC" in str(header_row[c]).upper()
-             or "HOSPITAL" in str(header_row[c]).upper()
-             or "CSPS" in str(header_row[c]).upper()), None
-        )
+            header_row = raw.iloc[3]
+            visit_cols = [
+                c for c in raw.columns
+                if "visit" in str(header_row[c]).lower()
+            ]
+            doc_col = next(
+                (c for c in raw.columns if "NOM" in str(header_row[c]).upper()), None
+            )
+            spec_col = next(
+                (c for c in raw.columns if "SPEC" in str(header_row[c]).upper()), None
+            )
+            clinic_col = next(
+                (c for c in raw.columns
+                 if "CLINIC" in str(header_row[c]).upper()
+                 or "HOSPITAL" in str(header_row[c]).upper()
+                 or "CSPS" in str(header_row[c]).upper()), None
+            )
 
-        for i, row in raw.iterrows():
-            if i <= 3:
-                continue
-            doctor = str(row[doc_col]).strip() if doc_col is not None else ""
-            if not doctor or doctor.upper() in ("NAN", "NOM /PERNOM", ""):
-                continue
-            speciality = str(row[spec_col]).strip() if spec_col is not None else ""
-            clinic = str(row[clinic_col]).strip() if clinic_col is not None else ""
-            for vc in visit_cols:
-                cell = row[vc]
-                if pd.isna(cell):
+            for i, row in raw.iterrows():
+                if i <= 3:
                     continue
-                try:
-                    vdate = pd.to_datetime(cell)
-                    all_rows.append({
-                        "MR": mr_name,
-                        "Doctor": doctor,
-                        "Speciality": speciality,
-                        "Clinic": clinic,
-                        "Visit_Date": vdate,
-                    })
-                except Exception:
+                doctor = str(row[doc_col]).strip() if doc_col is not None else ""
+                if not doctor or doctor.upper() in ("NAN", "NOM /PERNOM", ""):
                     continue
+                speciality = str(row[spec_col]).strip() if spec_col is not None else ""
+                clinic = str(row[clinic_col]).strip() if clinic_col is not None else ""
+                for vc in visit_cols:
+                    cell = row[vc]
+                    if pd.isna(cell):
+                        continue
+                    try:
+                        vdate = pd.to_datetime(cell)
+                        all_rows.append({
+                            "MR_ID": mr_id,
+                            "MR": mr_display_name(mr_id) if mr_id not in ("UNKNOWN",) else mr_name,
+                            "Doctor": doctor,
+                            "Speciality": speciality,
+                            "Clinic": clinic,
+                            "Visit_Date": vdate,
+                            "Month": month_label,
+                        })
+                    except Exception:
+                        continue
     if all_rows:
         df = pd.DataFrame(all_rows)
         df["Visit_Date"] = pd.to_datetime(df["Visit_Date"])
         return df
-    return pd.DataFrame(columns=["MR", "Doctor", "Speciality", "Clinic", "Visit_Date"])
+    return pd.DataFrame(columns=["MR_ID","MR","Doctor","Speciality","Clinic","Visit_Date","Month"])
 
 
 @st.cache_data(show_spinner=False)
@@ -1175,39 +1198,48 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
         st.info("Upload Monthly Reports file to see MR performance.")
         return
 
-    # Build spend per MR
-    mr_spend_map = {}
-    if not ae.empty:
-        for _, row in ae.iterrows():
-            resp = str(row["Responsible"]).upper()
-            for mr in delegates["Delegate"].tolist():
-                if any(part.upper() in resp for part in mr.split() if len(part) > 2):
-                    mr_spend_map[mr] = mr_spend_map.get(mr, 0) + row["Amount_FCFA"]
+    # Exclude CM (MR_006) and ARRA BEHOU (AGT_001) — field MRs only
+    field_delegates = delegates[
+        ~delegates["MR_ID"].isin(_NON_MR_IDS)
+    ].copy()
 
-    # Build visit count per MR
-    visit_count_map = {}
-    if not visits.empty:
-        for mr in delegates["Delegate"].tolist():
-            parts = [p for p in mr.split() if len(p) > 2]
-            matched = [v for v in visits["MR"].unique()
-                       if any(p.upper() in v.upper() for p in parts)]
-            if matched:
-                visit_count_map[mr] = int(visits[visits["MR"].isin(matched)].shape[0])
+    if field_delegates.empty:
+        st.info("No field MR data found after filtering.")
+        return
+
+    # Build spend per MR_ID from normalized MR_IDs column
+    # Joint entries ("MR_006,MR_002") are split and each gets the full amount
+    mr_spend_map = {}  # MR_ID -> FCFA
+    if not ae.empty and "MR_IDs" in ae.columns:
+        for _, row in ae.iterrows():
+            for mr_id in str(row["MR_IDs"]).split(","):
+                mr_id = mr_id.strip()
+                if mr_id and mr_id not in ("UNKNOWN",):
+                    mr_spend_map[mr_id] = mr_spend_map.get(mr_id, 0) + row["Amount_FCFA"]
+
+    # Build visit count per MR_ID from normalized visit tracker
+    visit_count_map = {}  # MR_ID -> count
+    if not visits.empty and "MR_ID" in visits.columns:
+        feb_visits = visits[visits["Month"] == "Feb"] if "Month" in visits.columns else visits
+        vc = feb_visits.groupby("MR_ID").size().to_dict()
+        visit_count_map = vc
 
     # Per-MR KPI rows
     st.subheader("👥 MR Individual KPIs")
-    for _, row in delegates.iterrows():
-        mr = row["Delegate"]
-        spend = mr_spend_map.get(mr, 0)
-        st.markdown(f"##### {mr} — *{row['Territory']}*")
+    for _, row in field_delegates.iterrows():
+        mr_id = row["MR_ID"]
+        display = mr_display_name(mr_id) if mr_id in MR_CANONICAL else row["Delegate"]
+        spend = mr_spend_map.get(mr_id, 0)
+        territory = territory_display_name(normalize_territory(row["Territory"]))
+        st.markdown(f"##### {display} — *{territory}*")
         kpi_row([
-            {"label": "Total Calls",      "value": f"{int(row['TotalCalls'])}",  "color": CLR_BLUE},
-            {"label": "Prescriber Calls", "value": f"{int(row['Prescriber'])}",  "color": CLR_TEAL},
+            {"label": "Total Calls",      "value": f"{int(row['TotalCalls'])}",   "color": CLR_BLUE},
+            {"label": "Prescriber Calls", "value": f"{int(row['Prescriber'])}",   "color": CLR_TEAL},
             {"label": "Drs Converted",    "value": f"{int(row['DrsConverted'])}", "color": CLR_GREEN},
             {"label": "Days Worked",
              "value": f"{int(row['DaysWorked'])}/{int(row['DaysTarget'])}",
              "color": CLR_ORANGE},
-            {"label": f"Spend ({unit})", "value": fmt_currency(spend*mul, unit), "color": CLR_PURPLE},
+            {"label": f"Spend ({unit})",  "value": fmt_currency(spend*mul, unit), "color": CLR_PURPLE},
         ])
         st.markdown("")
     st.markdown("---")
@@ -1216,10 +1248,10 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
     st.subheader("📊 Reported vs Verified Visits per MR")
     if not visits.empty:
         comparison = pd.DataFrame([
-            {"MR": row["Delegate"],
+            {"MR": mr_display_name(row["MR_ID"]) if row["MR_ID"] in MR_CANONICAL else row["Delegate"],
              "Reported (Self)": int(row["TotalCalls"]),
-             "Verified (Tracker)": visit_count_map.get(row["Delegate"], 0)}
-            for _, row in delegates.iterrows()
+             "Verified (Tracker)": visit_count_map.get(row["MR_ID"], 0)}
+            for _, row in field_delegates.iterrows()
         ])
         fig_cmp = go.Figure()
         fig_cmp.add_bar(name="Reported (Self)", x=comparison["MR"],
@@ -1238,8 +1270,11 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("💸 Total Spend per MR")
-        spend_df = pd.DataFrame([{"MR": k, "Spend": v*mul}
-                                  for k,v in mr_spend_map.items()])
+        spend_df = pd.DataFrame([
+            {"MR": mr_display_name(k), "Spend": v*mul}
+            for k, v in mr_spend_map.items()
+            if k not in _NON_MR_IDS
+        ])
         if not spend_df.empty:
             fig_sp = px.bar(spend_df, x="MR", y="Spend", template=TEMPLATE,
                             color="Spend", color_continuous_scale="Viridis", height=340,
@@ -1252,10 +1287,13 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
 
     with col2:
         st.subheader("🩺 Doctors Converted per MR")
-        conv = delegates[["Delegate","DrsConverted"]].sort_values("DrsConverted", ascending=False)
-        fig_conv = px.bar(conv, x="Delegate", y="DrsConverted", template=TEMPLATE, height=340,
+        conv = field_delegates[["Delegate","DrsConverted"]].copy()
+        conv["MR"] = field_delegates["MR_ID"].apply(
+            lambda i: mr_display_name(i) if i in MR_CANONICAL else i)
+        conv = conv.sort_values("DrsConverted", ascending=False)
+        fig_conv = px.bar(conv, x="MR", y="DrsConverted", template=TEMPLATE, height=340,
                           color="DrsConverted", color_continuous_scale="Teal",
-                          labels={"DrsConverted": "Converted", "Delegate": "MR"})
+                          labels={"DrsConverted": "Converted", "MR": "MR"})
         fig_conv.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20)
         st.plotly_chart(fig_conv, width='stretch')
@@ -1263,16 +1301,19 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
 
     # Summary table
     st.subheader("📋 MR Summary Table")
-    summary = delegates.copy()
-    summary["Spend"] = summary["Delegate"].map(
-        lambda m: fmt_currency(mr_spend_map.get(m, 0)*mul, unit))
-    summary["Verified Visits"] = summary["Delegate"].map(
-        lambda m: visit_count_map.get(m, 0))
+    summary = field_delegates.copy()
+    summary["Display"] = summary["MR_ID"].apply(
+        lambda i: mr_display_name(i) if i in MR_CANONICAL else summary.loc[summary["MR_ID"]==i, "Delegate"].values[0]
+    )
+    summary["Spend"] = summary["MR_ID"].map(
+        lambda i: fmt_currency(mr_spend_map.get(i, 0)*mul, unit))
+    summary["Verified Visits"] = summary["MR_ID"].map(
+        lambda i: visit_count_map.get(i, 0))
     st.dataframe(
-        summary[["Delegate","Territory","TotalCalls","Prescriber",
+        summary[["Display","Territory","TotalCalls","Prescriber",
                  "DrsConverted","DaysWorked","Verified Visits","Spend"]].rename(columns={
-            "Delegate":"MR","TotalCalls":"Total Calls","Prescriber":"Prescriber Calls",
-            "DrsConverted":"Drs Converted","DaysWorked":"Days Worked",
+            "Display":"MR", "TotalCalls":"Total Calls", "Prescriber":"Prescriber Calls",
+            "DrsConverted":"Drs Converted", "DaysWorked":"Days Worked",
             "Spend": f"Spend ({unit})"}),
         width='stretch', hide_index=True)
 
@@ -1350,15 +1391,21 @@ def render_tab4(expense_data, monthly_data, currency):
             st.info("Upload Expense file to see spend timeline.")
     st.markdown("---")
 
-    # Stacked bar: CM vs MR vs Other
+    # Stacked bar: CM vs MR vs Agent vs Other (using normalized MR_IDs)
     st.subheader("📊 Spend Breakdown by Category")
-    cm_keywords = ["JITENDRA", "JITENDER", "JITU"]
-    if not ae.empty:
+    if not ae.empty and "MR_IDs" in ae.columns:
+        def classify_spend(mr_ids_str):
+            ids = [i.strip() for i in str(mr_ids_str).split(",")]
+            if "MR_006" in ids:
+                return "CM Direct"
+            if "AGT_001" in ids:
+                return "Agent (ARRA BEHOU)"
+            non_cm = [i for i in ids if i not in ("MR_006", "AGT_001", "UNKNOWN")]
+            if non_cm:
+                return "MR Attributed"
+            return "Other"
         ae_copy = ae.copy()
-        ae_copy["SpendType"] = ae_copy["Responsible"].apply(
-            lambda r: "CM Direct" if any(k in str(r).upper() for k in cm_keywords)
-                      else "MR Attributed"
-        )
+        ae_copy["SpendType"] = ae_copy["MR_IDs"].apply(classify_spend)
         spend_by_type = ae_copy.groupby("SpendType")["Amount_FCFA"].sum().reset_index()
     else:
         spend_by_type = pd.DataFrame(columns=["SpendType","Amount_FCFA"])
@@ -1371,9 +1418,11 @@ def render_tab4(expense_data, monthly_data, currency):
     spend_by_type["Amount"] = spend_by_type["Amount_FCFA"] * mul
 
     colors_map = {"CM Direct": CLR_ORANGE, "MR Attributed": CLR_TEAL,
-                  "Other Expenses": CLR_PURPLE}
+                  "Agent (ARRA BEHOU)": CLR_YELLOW, "Other Expenses": CLR_PURPLE, "Other": CLR_BLUE}
     fig_stk = go.Figure()
     for _, row in spend_by_type.iterrows():
+        if row["Amount"] == 0:
+            continue
         fig_stk.add_bar(name=row["SpendType"], x=["Feb 2026"],
                         y=[row["Amount"]],
                         marker_color=colors_map.get(row["SpendType"], CLR_BLUE),
@@ -1389,26 +1438,42 @@ def render_tab4(expense_data, monthly_data, currency):
 
     # CM-level activity table
     st.subheader("📋 CM Direct Activities")
-    if not ae.empty:
-        cm_df = ae[ae["Responsible"].str.upper().str.contains("|".join(cm_keywords), na=False)].copy()
+    if not ae.empty and "MR_IDs" in ae.columns:
+        cm_df = ae[ae["MR_IDs"].str.contains("MR_006", na=False)].copy()
         if not cm_df.empty:
             cm_df["Amount"] = cm_df["Amount_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
             st.dataframe(
-                cm_df[["Doctor","Hospital","Speciality","Activity","Products","Amount","Responsible"]]\
+                cm_df[["Doctor","Hospital","Speciality","Activity","Products","Amount","Responsible"]]
                     .rename(columns={"Amount": f"Amount ({unit})"}),
                 width='stretch', hide_index=True)
         else:
             st.info("No CM-direct entries found.")
     st.markdown("---")
 
-    # Other Expenses table
+    # ── Agent Activities (ARRA BEHOU = AGT_001) ──
+    st.subheader("🤝 Agent Activities (ARRA BEHOU)")
+    if not ae.empty and "MR_IDs" in ae.columns:
+        agent_df = ae[ae["MR_IDs"].str.contains("AGT_001", na=False)].copy()
+        if not agent_df.empty:
+            agent_df["Amount"] = agent_df["Amount_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
+            agent_total = agent_df["Amount_FCFA"].sum()
+            st.caption(f"Total Agent Spend: **{fmt_currency(agent_total*mul, unit)}**")
+            st.dataframe(
+                agent_df[["Doctor","Hospital","Speciality","Activity","Products","Amount"]]
+                    .rename(columns={"Amount": f"Amount ({unit})"}),
+                width='stretch', hide_index=True)
+        else:
+            st.info("No agent activity entries found.")
+    st.markdown("---")
+
+    # Other Expenses table — full columns as specified
     st.subheader("📋 Other Expenses")
     if not oe.empty:
         oe_display = oe.copy()
-        oe_display["Amount"] = oe_display["Amount_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
+        oe_display[f"Amount ({unit})"] = oe_display["Amount_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
+        oe_display["Amount EUR"] = oe_display["Amount_EUR"].apply(lambda v: fmt_currency(v, "EUR"))
         st.dataframe(
-            oe_display[["Country","Details","Amount","Comments","Category"]]\
-                .rename(columns={"Amount": f"Amount ({unit})"}),
+            oe_display[["Country","Details",f"Amount ({unit})","Amount EUR","Comments","Category"]],
             width='stretch', hide_index=True)
     else:
         st.info("No other expense data.")
@@ -1420,52 +1485,53 @@ def render_tab4(expense_data, monthly_data, currency):
 
 def render_tab5(visit_data):
     if visit_data.empty:
-        placeholder_tab("Visit Timeline", "Upload the Visit Tracker file to see this tab.")
+        placeholder_tab("Visit Timeline", "Upload at least one Visit Tracker file to see this tab.")
         return
 
     visits = visit_data.copy()
-    visits["Day"]   = visits["Visit_Date"].dt.day
-    visits["Month"] = visits["Visit_Date"].dt.month
-    visits["Year"]  = visits["Visit_Date"].dt.year
+    visits["Day"] = visits["Visit_Date"].dt.day
 
-    # Filter to Feb 2026
-    feb_visits = visits[(visits["Month"] == 2) & (visits["Year"] == 2026)].copy()
+    # ── Controls ──
+    ctrl1, ctrl2 = st.columns([1, 2])
+    with ctrl1:
+        available_months = sorted(visits["Month"].unique()) if "Month" in visits.columns else ["Feb"]
+        selected_month = st.selectbox("📅 Month", available_months, index=0)
+    with ctrl2:
+        mr_list = sorted(visits["MR"].unique().tolist())
+        selected_mr = st.selectbox("👤 MR", ["All"] + mr_list)
 
-    mr_list = sorted(visits["MR"].unique().tolist())
-    selected_mr = st.selectbox("Select MR", ["All"] + mr_list)
-
-    filtered = feb_visits if selected_mr == "All" else feb_visits[feb_visits["MR"] == selected_mr]
-
+    month_visits = visits[visits["Month"] == selected_month].copy() if "Month" in visits.columns else visits
+    filtered = month_visits if selected_mr == "All" else month_visits[month_visits["MR"] == selected_mr]
     st.markdown("---")
 
-    # Calendar heat-map (x=day, y=MR)
-    st.subheader("📅 Visit Calendar Heatmap — February 2026")
+    # ── Daily Visit Line Chart (above heatmap as specified) ──
+    st.subheader(f"📈 Daily Visit Count — {selected_month} 2026")
+    if not filtered.empty:
+        daily = filtered.groupby(["MR", "Visit_Date"]).size().reset_index(name="Count")
+        fig_line = px.line(daily, x="Visit_Date", y="Count",
+                           color="MR", markers=True, template=TEMPLATE, height=360,
+                           labels={"Visit_Date": "Date", "Count": "Visits per Day"})
+        fig_line.update_traces(line_width=2.5)
+        fig_line.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                               margin=dict(t=20, b=20), legend=dict(orientation="h", y=1.1))
+        st.plotly_chart(fig_line, width='stretch')
+
+    # ── Calendar Heatmap ──
+    st.subheader(f"📅 Visit Calendar Heatmap — {selected_month} 2026")
     if not filtered.empty:
         hm_data = filtered.groupby(["MR", "Day"]).size().reset_index(name="Visits")
         fig_hm = px.density_heatmap(
             hm_data, x="Day", y="MR", z="Visits",
             color_continuous_scale="Teal", template=TEMPLATE, height=360,
             labels={"Day": "Day of Month", "MR": "MR"},
-            title="Visit Density — Feb 2026",
+            title=f"Visit Density — {selected_month} 2026",
         )
         fig_hm.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                              margin=dict(t=50, b=20))
         st.plotly_chart(fig_hm, width='stretch')
-
-    # Daily visit count line chart
-    st.subheader("📈 Daily Visit Count — Feb 2026")
-    if not filtered.empty:
-        daily = filtered.groupby(["MR", "Visit_Date"]).size().reset_index(name="Count")
-        fig_line = px.line(daily, x="Visit_Date", y="Count",
-                           color="MR", markers=True, template=TEMPLATE, height=360,
-                           labels={"Visit_Date": "Date", "Count": "Visits"})
-        fig_line.update_traces(line_width=2.5)
-        fig_line.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                               margin=dict(t=20, b=20), legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(fig_line, width='stretch')
     st.markdown("---")
 
-    # Detail table
+    # ── Detail Table ──
     st.subheader("📋 Visit Details")
     if not filtered.empty:
         show = filtered[["MR","Doctor","Speciality","Clinic","Visit_Date"]].copy()
@@ -1474,7 +1540,7 @@ def render_tab5(visit_data):
         st.dataframe(show.rename(columns={"Visit_Date": "Visit Date"}),
                      width='stretch', hide_index=True)
     else:
-        st.info("No visits found for the selected MR in February 2026.")
+        st.info(f"No visits found for the selected filter in {selected_month} 2026.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1588,8 +1654,10 @@ def main():
                                       type=["xlsx"], key="expense")
         f_monthly  = st.file_uploader("Monthly Reports (IVC_MONTHLY…xlsx)",
                                       type=["xlsx"], key="monthly")
-        f_visits   = st.file_uploader("Visit Tracker (Ivory_coast_visit_tracker…xlsx)",
-                                      type=["xlsx"], key="visits")
+        f_visits_feb = st.file_uploader("Visit Tracker — Feb (Ivory_coast_visit_tracker…xlsx)",
+                                        type=["xlsx"], key="visits_feb")
+        f_visits_mar = st.file_uploader("Visit Tracker — Mar (ivc_March-2026.xlsx)",
+                                        type=["xlsx"], key="visits_mar")
         f_copy     = st.file_uploader("Copy of Report (Copy_of_report…xlsx)",
                                       type=["xlsx"], key="copy")
 
@@ -1601,13 +1669,32 @@ def main():
         )
 
     # ── Load Data ──
-    sales_data  = load_sales(f_sales.read())    if f_sales   else None
-    proj_data   = load_projection(f_proj.read()) if f_proj   else None
-    expense_data= load_expense(f_expense.read()) if f_expense else None
-    monthly_data= load_monthly_reports(f_monthly.read()) if f_monthly else None
-    visit_data  = load_visit_tracker(f_visits.read()) if f_visits else pd.DataFrame(
-        columns=["MR","Doctor","Speciality","Clinic","Visit_Date"])
-    copy_data   = load_copy_report(f_copy.read()) if f_copy else None
+    sales_data   = load_sales(f_sales.read())     if f_sales    else None
+    proj_data    = load_projection(f_proj.read()) if f_proj     else None
+    expense_data = load_expense(f_expense.read()) if f_expense  else None
+    monthly_data = load_monthly_reports(f_monthly.read()) if f_monthly else None
+    copy_data    = load_copy_report(f_copy.read()) if f_copy    else None
+
+    # Build visit tracker from one or both uploaded files
+    tracker_inputs = []
+    if f_visits_feb:
+        tracker_inputs.append((f_visits_feb.read(), "Feb"))
+    if f_visits_mar:
+        tracker_inputs.append((f_visits_mar.read(), "Mar"))
+    visit_data = (
+        load_visit_tracker(tracker_inputs) if tracker_inputs
+        else pd.DataFrame(columns=["MR_ID","MR","Doctor","Speciality","Clinic","Visit_Date","Month"])
+    )
+
+    # Build doctor index for fuzzy normalization (from visit tracker)
+    if not visit_data.empty:
+        build_doctor_index(visit_data["Doctor"].dropna().tolist())
+
+    # Normalize delegate MR_IDs in monthly report
+    if monthly_data and not monthly_data["delegates"].empty:
+        monthly_data["delegates"]["MR_ID"] = (
+            monthly_data["delegates"]["Delegate"].apply(normalize_mr)
+        )
 
     # ── Tabs ──
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
