@@ -464,6 +464,9 @@ def load_visit_tracker(files_and_months: list) -> pd.DataFrame:
                  or "CSPS" in str(header_row[c]).upper()), None
             )
 
+            for vc in visit_cols:
+                raw[vc] = pd.to_datetime(raw[vc], errors="coerce")
+
             for i, row in raw.iterrows():
                 if i <= 3:
                     continue
@@ -473,22 +476,18 @@ def load_visit_tracker(files_and_months: list) -> pd.DataFrame:
                 speciality = str(row[spec_col]).strip() if spec_col is not None else ""
                 clinic = str(row[clinic_col]).strip() if clinic_col is not None else ""
                 for vc in visit_cols:
-                    cell = row[vc]
-                    if pd.isna(cell):
+                    vdate = row[vc]
+                    if pd.isna(vdate):
                         continue
-                    try:
-                        vdate = pd.to_datetime(cell)
-                        all_rows.append({
-                            "MR_ID": mr_id,
-                            "MR": mr_display_name(mr_id) if mr_id not in ("UNKNOWN",) else mr_name,
-                            "Doctor": doctor,
-                            "Speciality": speciality,
-                            "Clinic": clinic,
-                            "Visit_Date": vdate,
-                            "Month": month_label,
-                        })
-                    except Exception:
-                        continue
+                    all_rows.append({
+                        "MR_ID": mr_id,
+                        "MR": mr_display_name(mr_id) if mr_id not in ("UNKNOWN",) else mr_name,
+                        "Doctor": doctor,
+                        "Speciality": speciality,
+                        "Clinic": clinic,
+                        "Visit_Date": vdate,
+                        "Month": month_label,
+                    })
     if all_rows:
         df = pd.DataFrame(all_rows)
         df["Visit_Date"] = pd.to_datetime(df["Visit_Date"])
@@ -1513,7 +1512,8 @@ def render_tab5(visit_data):
                            labels={"Visit_Date": "Date", "Count": "Visits per Day"})
         fig_line.update_traces(line_width=2.5)
         fig_line.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                               margin=dict(t=20, b=20), legend=dict(orientation="h", y=1.1))
+                               margin=dict(t=20, b=20), legend=dict(orientation="h", y=1.1),
+                               xaxis_tickformat="%d %b")
         st.plotly_chart(fig_line, width='stretch')
 
     # ── Calendar Heatmap ──
