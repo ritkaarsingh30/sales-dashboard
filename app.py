@@ -1248,7 +1248,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
 # TAB 3 — MR PERFORMANCE
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_tab3(monthly_data, expense_data, visit_data, currency):
+def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency):
     delegates = monthly_data["delegates"]
     ae = expense_data["activity_exp"]
     visits = visit_data
@@ -1360,6 +1360,39 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
         fig_conv.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20)
         st.plotly_chart(fig_conv, width='stretch')
+    st.markdown("---")
+
+    # ── Tour Plan Coverage ──
+    st.subheader("🗺️ Tour Program Coverage (Feb 2026)")
+    if tour_plan_data is None or tour_plan_data.empty:
+        st.info("Upload Tour Plan file (e.g. IVC TOUR PLAN VS WORKING AREA.xlsx) to view coverage analysis.")
+    else:
+        # Calculate coverage %
+        tp_summary = tour_plan_data.groupby('MR Name').apply(
+            lambda x: pd.Series({
+                'Total Planned Locations': len(x),
+                'Covered Locations': x['Is Covered'].sum(),
+                'Coverage %': (x['Is Covered'].sum() / len(x) * 100) if len(x) > 0 else 0
+            })
+        ).reset_index()
+
+        # Display bar chart of coverage %
+        fig = px.bar(
+            tp_summary, x='MR Name', y='Coverage %',
+            title='Tour Plan Location Coverage % by MR',
+            color='Coverage %',
+            color_continuous_scale="blues",
+            text_auto='.1f'
+        )
+        fig.update_layout(template="plotly_dark")
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("**Coverage Details**")
+        st.dataframe(
+            tour_plan_data[['Date', 'MR Name', 'Planned Area', 'Actual Working Area', 'Is Covered']].sort_values(by=['MR Name', 'Date']),
+            use_container_width=True
+        )
+
     st.markdown("---")
 
     # Summary table
@@ -1853,7 +1886,7 @@ def main():
 
     with tab3:
         if monthly_data and expense_data:
-            render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency)
+            render_tab3(monthly_data, expense_data, visit_data, currency)
         else:
             placeholder_tab("MR Performance",
                             "Upload Monthly Reports + Expense files.")
