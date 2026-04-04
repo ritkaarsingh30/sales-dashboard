@@ -871,7 +871,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
 # TAB 3 — MR PERFORMANCE
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_tab3(monthly_data, expense_data, visit_data, currency):
+def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency):
     delegates = monthly_data["delegates"]
     ae = expense_data["activity_exp"]
     visits = visit_data
@@ -1384,8 +1384,7 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
 
     # ── Tour Program Coverage ──
     st.subheader("🗺️ Tour Program Coverage (Planned vs Actual Area)")
-    tour_plan_data = locals().get('tour_plan_data', pd.DataFrame()) # grab from args passed to render_tab3
-    if not tour_plan_data.empty:
+    if tour_plan_data is not None and not tour_plan_data.empty:
         # Group by MR to show coverage %
         tp_mr = tour_plan_data.groupby('MR').agg(
             Total_Plans=('Date', 'count'),
