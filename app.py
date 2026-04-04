@@ -481,6 +481,58 @@ def load_visit_tracker(files_and_months: list) -> pd.DataFrame:
     return pd.DataFrame(columns=["MR_ID","MR","Doctor","Speciality","Clinic","Visit_Date","Month"])
 
 
+def is_covered(plan, actual):
+    if not plan or not actual or str(plan).strip() in ('nan', '') or str(actual).strip() in ('nan', ''):
+        return False
+
+    p_up = str(plan).upper()
+    a_up = str(actual).upper()
+
+    # Strip common generic words that might cause false positives
+    stopwords = {"ZONE", "DE", "DU", "LA", "LE", "LES"}
+
+    p_words = set(w for w in re.findall(r'[A-Z0-9]{3,}', p_up) if w not in stopwords)
+    a_words = set(w for w in re.findall(r'[A-Z0-9]{3,}', a_up) if w not in stopwords)
+
+    if not p_words or not a_words:
+        return p_up == a_up
+
+    # Covered if intersection is not empty
+    return len(p_words & a_words) > 0
+
+@st.cache_data(show_spinner=False)
+def load_tour_plan(file_bytes: bytes) -> pd.DataFrame:
+    raw = pd.read_excel(BytesIO(file_bytes), sheet_name=0)
+
+    # Assuming columns: Date, Name, Joint working, Tour plan, Working Area
+    # We will rename to standard keys if they match the expected format
+    cols = list(raw.columns)
+
+    rows = []
+    for i, row in raw.iterrows():
+        name = str(row.iloc[1]).strip() if len(cols) > 1 else ""
+        if not name or name.upper() in ("NAN", "NAME"):
+            continue
+
+        plan = str(row.iloc[3]).strip() if len(cols) > 3 else ""
+        actual = str(row.iloc[4]).strip() if len(cols) > 4 else ""
+        joint = str(row.iloc[2]).strip() if len(cols) > 2 else ""
+
+        # Check coverage
+        coverage = is_covered(plan, actual)
+
+        rows.append({
+            "Date": row.iloc[0],
+            "MR": normalize_mr(name),
+            "Joint_Working": joint,
+            "Planned_Area": plan,
+            "Actual_Area": actual,
+            "Covered": coverage
+        })
+
+    df = pd.DataFrame(rows)
+    return df
+
 @st.cache_data(show_spinner=False)
 def load_copy_report(file_bytes: bytes) -> dict:
     """
@@ -620,16 +672,16 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
         )
         st.plotly_chart(fig_trend, width='stretch')
 
-    # Jan vs Feb grouped bar alongside
+    # Jan vs Feb comparison line
     if not jan.empty and not feb.empty:
         st.subheader("📊 Jan vs Feb Sales Comparison (Units)")
         fig_cmp = go.Figure()
-        fig_cmp.add_bar(name="Jan", x=trend["Product"], y=trend["Jan"],
-                        marker_color=CLR_BLUE)
-        fig_cmp.add_bar(name="Feb", x=trend["Product"], y=trend["Feb"],
-                        marker_color=CLR_TEAL)
+        fig_cmp.add_trace(go.Scatter(name="Jan", x=trend["Product"], y=trend["Jan"],
+                                     mode='lines+markers', line=dict(color=CLR_BLUE, width=2)))
+        fig_cmp.add_trace(go.Scatter(name="Feb", x=trend["Product"], y=trend["Feb"],
+                                     mode='lines+markers', line=dict(color=CLR_TEAL, width=2)))
         fig_cmp.update_layout(
-            barmode="group", template=TEMPLATE, height=360,
+            template=TEMPLATE, height=360,
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(t=20, b=40), xaxis_tickangle=-30,
         )
@@ -637,37 +689,55 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
 
     st.markdown("---")
 
-    # ── Distributor 2x2 subplots ──
-    st.subheader("🏭 Feb Sales by Distributor")
-    if not feb.empty:
+    # ── Distributor 2x2 subplots with MoM Growth ──
+    st.subheader("🏭 Sales by Distributor (Units) with MoM Growth")
+    if not feb.empty and not jan.empty:
         fig_dist = make_subplots(
             rows=2, cols=2,
             subplot_titles=DISTRIBUTORS,
             shared_yaxes=False,
-            vertical_spacing=0.18,
+            vertical_spacing=0.25,
             horizontal_spacing=0.08,
         )
         positions = [(1, 1), (1, 2), (2, 1), (2, 2)]
         for (r, c), dist in zip(positions, DISTRIBUTORS):
             col_key = f"{dist}_SALES"
-            if col_key not in feb.columns:
+            if col_key not in feb.columns or col_key not in jan.columns:
                 continue
-            sub = feb[feb[col_key] > 0][["Product", col_key]].copy()
-            sub = sub.sort_values(col_key, ascending=True)
+
+            # Merge Jan and Feb for this distributor
+            d_jan = jan[["Product", col_key]].rename(columns={col_key: "Jan_Sales"})
+            d_feb = feb[["Product", col_key]].rename(columns={col_key: "Feb_Sales"})
+            sub = pd.merge(d_feb, d_jan, on="Product", how="left").fillna(0)
+
+            # Filter where there is at least some sale
+            sub = sub[(sub["Feb_Sales"] > 0) | (sub["Jan_Sales"] > 0)].copy()
+            sub = sub.sort_values("Feb_Sales", ascending=True)
+
+            # Calculate MoM growth percentage
+            sub["MoM_Text"] = sub.apply(
+                lambda row: f"+{((row['Feb_Sales'] - row['Jan_Sales'])/row['Jan_Sales']*100):.0f}%" if row['Jan_Sales'] > 0 and row['Feb_Sales'] > row['Jan_Sales'] else (
+                            f"{((row['Feb_Sales'] - row['Jan_Sales'])/row['Jan_Sales']*100):.0f}%" if row['Jan_Sales'] > 0 else "New"),
+                axis=1
+            )
+
+            # Create text to display value and MoM
+            sub["Display_Text"] = sub["Feb_Sales"].astype(int).astype(str) + " (" + sub["MoM_Text"] + ")"
+
             trace = go.Bar(
                 name=dist,
-                x=sub[col_key],
+                x=sub["Feb_Sales"],
                 y=sub["Product"],
                 orientation="h",
                 marker_color=DIST_COLORS[dist],
-                text=sub[col_key].astype(int),
+                text=sub["Display_Text"],
                 textposition="outside",
                 showlegend=False,
             )
             fig_dist.add_trace(trace, row=r, col=c)
 
         fig_dist.update_layout(
-            template=TEMPLATE, height=600,
+            template=TEMPLATE, height=700,
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(t=40, b=20),
         )
@@ -1018,14 +1088,14 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
                                 margin=dict(t=20, b=20))
         st.plotly_chart(fig_trend, width='stretch')
 
-        # Grouped bar version
+        # Comparison Line Graph
         st.subheader("📊 Jan vs Feb Sales Comparison (Units)")
         fig_cmp = go.Figure()
-        fig_cmp.add_bar(name="Jan", x=trend["Product"], y=trend["Jan"],
-                        marker_color=CLR_BLUE)
-        fig_cmp.add_bar(name="Feb", x=trend["Product"], y=trend["Feb"],
-                        marker_color=CLR_TEAL)
-        fig_cmp.update_layout(barmode="group", template=TEMPLATE, height=360,
+        fig_cmp.add_trace(go.Scatter(name="Jan", x=trend["Product"], y=trend["Jan"],
+                                     mode='lines+markers', line=dict(color=CLR_BLUE, width=2)))
+        fig_cmp.add_trace(go.Scatter(name="Feb", x=trend["Product"], y=trend["Feb"],
+                                     mode='lines+markers', line=dict(color=CLR_TEAL, width=2)))
+        fig_cmp.update_layout(template=TEMPLATE, height=360,
                               plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                               margin=dict(t=20, b=60), xaxis_tickangle=-25,
                               legend=dict(orientation="h", y=1.1))
@@ -1033,24 +1103,43 @@ def render_tab1(sales_data, proj_data, copy_data, currency):
 
     st.markdown("---")
 
-    # Distributor 2x2 subplots
-    st.subheader("🏭 Feb Sales by Distributor (Units)")
-    if not feb.empty:
+    # Distributor 2x2 subplots with MoM Growth
+    st.subheader("🏭 Sales by Distributor (Units) with MoM Growth")
+    if not feb.empty and not jan.empty:
         fig_dist = make_subplots(rows=2, cols=2, subplot_titles=DISTRIBUTORS,
-                                 vertical_spacing=0.18, horizontal_spacing=0.10)
+                                 vertical_spacing=0.25, horizontal_spacing=0.10)
         positions = [(1,1),(1,2),(2,1),(2,2)]
         for (r, c), dist in zip(positions, DISTRIBUTORS):
             col_key = f"{dist}_SALES"
-            if col_key not in feb.columns:
+            if col_key not in feb.columns or col_key not in jan.columns:
                 continue
-            sub = feb[feb[col_key] > 0][["Product", col_key]].sort_values(col_key)
+
+            # Merge Jan and Feb for this distributor
+            d_jan = jan[["Product", col_key]].rename(columns={col_key: "Jan_Sales"})
+            d_feb = feb[["Product", col_key]].rename(columns={col_key: "Feb_Sales"})
+            sub = pd.merge(d_feb, d_jan, on="Product", how="left").fillna(0)
+
+            # Filter where there is at least some sale
+            sub = sub[(sub["Feb_Sales"] > 0) | (sub["Jan_Sales"] > 0)].copy()
+            sub = sub.sort_values("Feb_Sales", ascending=True)
+
+            # Calculate MoM growth percentage
+            sub["MoM_Text"] = sub.apply(
+                lambda row: f"+{((row['Feb_Sales'] - row['Jan_Sales'])/row['Jan_Sales']*100):.0f}%" if row['Jan_Sales'] > 0 and row['Feb_Sales'] > row['Jan_Sales'] else (
+                            f"{((row['Feb_Sales'] - row['Jan_Sales'])/row['Jan_Sales']*100):.0f}%" if row['Jan_Sales'] > 0 else "New"),
+                axis=1
+            )
+
+            # Create text to display value and MoM
+            sub["Display_Text"] = sub["Feb_Sales"].astype(int).astype(str) + " (" + sub["MoM_Text"] + ")"
+
             fig_dist.add_trace(go.Bar(
-                name=dist, x=sub[col_key], y=sub["Product"], orientation="h",
+                name=dist, x=sub["Feb_Sales"], y=sub["Product"], orientation="h",
                 marker_color=DIST_COLORS[dist],
-                text=sub[col_key].astype(int), textposition="outside",
+                text=sub["Display_Text"], textposition="outside",
                 showlegend=False,
             ), row=r, col=c)
-        fig_dist.update_layout(template=TEMPLATE, height=600,
+        fig_dist.update_layout(template=TEMPLATE, height=700,
                                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=50, b=20))
         st.plotly_chart(fig_dist, width='stretch')
@@ -1291,6 +1380,42 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
             "Spend": f"Spend ({unit})"}),
         width='stretch', hide_index=True)
 
+    st.markdown("---")
+
+    # ── Tour Program Coverage ──
+    st.subheader("🗺️ Tour Program Coverage (Planned vs Actual Area)")
+    tour_plan_data = locals().get('tour_plan_data', pd.DataFrame()) # grab from args passed to render_tab3
+    if not tour_plan_data.empty:
+        # Group by MR to show coverage %
+        tp_mr = tour_plan_data.groupby('MR').agg(
+            Total_Plans=('Date', 'count'),
+            Covered_Plans=('Covered', 'sum')
+        ).reset_index()
+        tp_mr['Coverage_%'] = (tp_mr['Covered_Plans'] / tp_mr['Total_Plans'] * 100).round(1)
+        tp_mr['MR_Display'] = tp_mr['MR'].apply(lambda i: mr_display_name(i) if i in MR_CANONICAL else i)
+
+        col_tp1, col_tp2 = st.columns([1, 2])
+        with col_tp1:
+            st.dataframe(tp_mr[['MR_Display', 'Total_Plans', 'Covered_Plans', 'Coverage_%']].rename(
+                columns={'MR_Display': 'MR', 'Total_Plans': 'Total Days Planned', 'Covered_Plans': 'Days Covered Area', 'Coverage_%': 'Coverage %'}
+            ), width='stretch', hide_index=True)
+
+        with col_tp2:
+            fig_tp = px.bar(tp_mr, x="MR_Display", y="Coverage_%", template=TEMPLATE, height=340,
+                            color="Coverage_%", color_continuous_scale="Teal",
+                            labels={"Coverage_%": "Coverage %", "MR_Display": "MR"})
+            fig_tp.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                                 margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20)
+            st.plotly_chart(fig_tp, width='stretch')
+
+        st.markdown("**Detail: Tour Plan Coverage**")
+        tp_detail = tour_plan_data.copy()
+        tp_detail['MR'] = tp_detail['MR'].apply(lambda i: mr_display_name(i) if i in MR_CANONICAL else i)
+        tp_detail['Date'] = pd.to_datetime(tp_detail['Date']).dt.strftime('%Y-%m-%d')
+        st.dataframe(tp_detail.rename(columns={'Planned_Area': 'Planned Area', 'Actual_Area': 'Actual Area', 'Joint_Working': 'Joint Working'}), width='stretch', hide_index=True)
+    else:
+        st.info("Upload 'Tour Plan' file to see area coverage metrics.")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 4 — CM SPEND
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1512,6 +1637,22 @@ def render_tab5(visit_data):
         st.plotly_chart(fig_hm, width='stretch')
     st.markdown("---")
 
+    # ── Doctor Repeat (> 2 times) ──
+    st.subheader("🔄 Doctor Repeat Visits (> 2 times)")
+    if not month_visits.empty:
+        # Calculate repetitions across the month independent of the MR selected filter above
+        repeat_visits = month_visits.groupby(["Doctor", "Clinic", "Speciality"]).size().reset_index(name="Visits")
+        repeat_visits = repeat_visits[repeat_visits["Visits"] > 2].sort_values("Visits", ascending=False)
+
+        if not repeat_visits.empty:
+            st.dataframe(repeat_visits.rename(columns={"Visits": "Total Visits"}), width='stretch', hide_index=True)
+        else:
+            st.info("No doctors were visited more than 2 times this month.")
+    else:
+        st.info("No visit data available to calculate repeat visits.")
+
+    st.markdown("---")
+
     # ── Detail Table ──
     st.subheader("📋 Visit Details")
     if not filtered.empty:
@@ -1641,6 +1782,8 @@ def main():
                                         type=["xlsx"], key="visits_mar")
         f_copy     = st.file_uploader("Copy of Report (Copy_of_report…xlsx)",
                                       type=["xlsx"], key="copy")
+        f_tour_plan = st.file_uploader("Tour Plan (IVC TOUR PLAN VS WORKING AREA.xlsx)",
+                                       type=["xlsx"], key="tour_plan")
 
         st.markdown("---")
         st.markdown(
@@ -1655,6 +1798,7 @@ def main():
     expense_data = load_expense(f_expense.read()) if f_expense  else None
     monthly_data = load_monthly_reports(f_monthly.read()) if f_monthly else None
     copy_data    = load_copy_report(f_copy.read()) if f_copy    else None
+    tour_plan_data = load_tour_plan(f_tour_plan.read()) if f_tour_plan else None
 
     # Build visit tracker from one or both uploaded files
     tracker_inputs = []
@@ -1710,7 +1854,7 @@ def main():
 
     with tab3:
         if monthly_data and expense_data:
-            render_tab3(monthly_data, expense_data, visit_data, currency)
+            render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency)
         else:
             placeholder_tab("MR Performance",
                             "Upload Monthly Reports + Expense files.")
