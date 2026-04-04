@@ -73,22 +73,6 @@ def safe_num(val):
         return 0.0
 
 
-def fuzzy_match(name: str, candidates: list, threshold: int = 70) -> str:
-    """Return best match from candidates using simple token overlap."""
-    name = str(name).upper().strip()
-    best, best_score = None, 0
-    for c in candidates:
-        c_up = str(c).upper().strip()
-        # Jaccard on word sets
-        a_words = set(re.split(r"\W+", name))
-        b_words = set(re.split(r"\W+", c_up))
-        inter = a_words & b_words
-        union = a_words | b_words
-        score = 100 * len(inter) / len(union) if union else 0
-        if score > best_score:
-            best_score = score
-            best = c
-    return best if best_score >= threshold else None
 
 
 def placeholder_tab(title: str, subtitle: str = ""):
@@ -235,14 +219,14 @@ def load_projection(file_bytes: bytes) -> dict:
             continue
         act_rows.append({
             "SN": int(sn),
-            "Doctor": str(row.iloc[1]).strip(),
+            "Doctor": normalize_doctor(str(row.iloc[1]).strip()),
             "Hospital": str(row.iloc[2]).strip(),
             "Speciality": str(row.iloc[3]).strip(),
-            "Delegate": str(row.iloc[4]).strip(),
-            "Area": str(row.iloc[5]).strip(),
-            "Activity": str(row.iloc[6]).strip(),
+            "Delegate": normalize_mr(str(row.iloc[4]).strip()),
+            "Area": normalize_territory(str(row.iloc[5]).strip()),
+            "Activity": normalize_activity(str(row.iloc[6]).strip()),
             "Amount_FCFA": safe_num(row.iloc[7]),
-            "Focus_Products": str(row.iloc[8]).strip(),
+            "Focus_Products": normalize_product(str(row.iloc[8]).strip()),
         })
     act_df = pd.DataFrame(act_rows)
     return {"projection": proj_df, "activity_plan": act_df}
@@ -320,18 +304,20 @@ def load_expense(file_bytes: bytes) -> dict:
             mr_ids = normalize_mr(raw_resp)
         ae_rows.append({
             "SN": int(sn),
-            "Doctor": str(row.iloc[1]).strip(),
+            "Doctor": normalize_doctor(str(row.iloc[1]).strip()),
             "Hospital": str(row.iloc[2]).strip(),
             "Speciality": str(row.iloc[3]).strip(),
             "Activity": str(row.iloc[4]).strip(),
             "Activity_ID": normalize_activity(str(row.iloc[4]).strip()),
-            "Products": str(row.iloc[5]).strip(),
+            "Products": normalize_product(str(row.iloc[5]).strip()),
             "Amount_FCFA": safe_num(row.iloc[6]),
             "Contact": str(row.iloc[7]).strip(),
             "Responsible": raw_resp,
             "MR_IDs": mr_ids,  # normalized, comma-sep for joint entries
         })
     ae_df = pd.DataFrame(ae_rows)
+    # Apply proper Activity names
+    ae_df["Activity"] = ae_df["Activity_ID"].apply(activity_display_name)
 
     # ── OTHER EXP ──
     raw_oe = pd.read_excel(xl, sheet_name="OTHER EXP.", header=None)
@@ -416,10 +402,10 @@ def load_monthly_reports(file_bytes: bytes) -> dict:
         if not doctor or doctor.upper() in ("NAN", "DR. NAME"):
             continue
         ba_rows.append({
-            "Doctor": doctor,
-            "Area": str(row.iloc[1]).strip(),
-            "MR": str(row.iloc[2]).strip(),
-            "ActivityType": str(row.iloc[3]).strip(),
+            "Doctor": normalize_doctor(doctor),
+            "Area": normalize_territory(str(row.iloc[1]).strip()),
+            "MR": normalize_mr(str(row.iloc[2]).strip()),
+            "ActivityType": normalize_activity(str(row.iloc[3]).strip()),
             "Value_FCFA": safe_num(row.iloc[4]),
         })
     ba_df = pd.DataFrame(ba_rows)
@@ -527,10 +513,10 @@ def load_copy_report(file_bytes: bytes) -> dict:
         doc_plan = str(row.iloc[5]).strip()
         if doc_plan and doc_plan.upper() not in ("NAN", "NAME OF DOCTOR", ""):
             plan_rows.append({
-                "Doctor": doc_plan,
+                "Doctor": normalize_doctor(doc_plan),
                 "Hospital": str(row.iloc[6]).strip(),
                 "Speciality": str(row.iloc[7]).strip(),
-                "Activity": str(row.iloc[8]).strip(),
+                "Activity": normalize_activity(str(row.iloc[8]).strip()),
                 "Amount_FCFA": safe_num(row.iloc[9]),
             })
 
@@ -538,13 +524,13 @@ def load_copy_report(file_bytes: bytes) -> dict:
         doc_actual = str(row.iloc[10]).strip()
         if doc_actual and doc_actual.upper() not in ("NAN", "DOCTOR NAME", ""):
             actual_rows.append({
-                "Doctor": doc_actual,
+                "Doctor": normalize_doctor(doc_actual),
                 "Hospital": str(row.iloc[11]).strip(),
                 "Speciality": str(row.iloc[12]).strip(),
-                "Activity": str(row.iloc[13]).strip(),
+                "Activity": normalize_activity(str(row.iloc[13]).strip()),
                 "Amount_FCFA": safe_num(row.iloc[14]),
                 "Remarks": str(row.iloc[15]).strip(),
-                "VisitedBy": str(row.iloc[16]).strip(),
+                "VisitedBy": normalize_mr(str(row.iloc[16]).strip()),
                 "NoOfVisits": safe_num(row.iloc[17]),
             })
 
@@ -718,16 +704,11 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
 
     # ── Planned vs Actual per doctor ──
     st.subheader("👨‍⚕️ Planned vs Actual Spend per Doctor")
-    # Build merged: fuzzy match plan → actual
     plan_agg = act_plan.groupby("Doctor")["Amount_FCFA"].sum().reset_index()
     plan_agg.columns = ["Doctor", "Planned_FCFA"]
     act_agg  = ae.groupby("Doctor")["Amount_FCFA"].sum().reset_index()
-    act_agg.columns = ["Doctor_Actual", "Actual_FCFA"]
+    act_agg.columns = ["Doctor", "Actual_FCFA"]
 
-    plan_doctors = plan_agg["Doctor"].tolist()
-    act_agg["Doctor"] = act_agg["Doctor_Actual"].apply(
-        lambda d: fuzzy_match(d, plan_doctors) or d
-    )
     merged = plan_agg.merge(act_agg[["Doctor", "Actual_FCFA"]], on="Doctor", how="outer").fillna(0)
     merged = merged[(merged["Planned_FCFA"] > 0) | (merged["Actual_FCFA"] > 0)]
     merged = merged.sort_values("Planned_FCFA", ascending=True)
@@ -794,9 +775,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
     if not ae.empty and not act_plan.empty:
         display = ae.copy()
         display["Planned_FCFA"] = display["Doctor"].apply(
-            lambda d: plan_agg[plan_agg["Doctor"] ==
-                               (fuzzy_match(d, plan_doctors) or d)]["Planned_FCFA"].sum()
-            if fuzzy_match(d, plan_doctors) else 0
+            lambda d: plan_agg[plan_agg["Doctor"] == d]["Planned_FCFA"].sum() if not plan_agg.empty else 0
         )
         display["Planned"] = display["Planned_FCFA"].apply(
             lambda v: fmt_currency(v * mul, unit)
@@ -1108,10 +1087,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
     plan_agg = act_plan.groupby("Doctor")["Amount_FCFA"].sum().reset_index()
     plan_agg.columns = ["Doctor", "Planned_FCFA"]
     act_agg  = ae.groupby("Doctor")["Amount_FCFA"].sum().reset_index()
-    act_agg.columns = ["Doctor_Actual", "Actual_FCFA"]
-    plan_doctors = plan_agg["Doctor"].tolist()
-    act_agg["Doctor"] = act_agg["Doctor_Actual"].apply(
-        lambda d: fuzzy_match(d, plan_doctors) or d)
+    act_agg.columns = ["Doctor", "Actual_FCFA"]
     merged = plan_agg.merge(act_agg[["Doctor","Actual_FCFA"]], on="Doctor", how="outer").fillna(0)
     merged = merged[(merged["Planned_FCFA"]>0)|(merged["Actual_FCFA"]>0)]
     merged = merged.sort_values("Planned_FCFA", ascending=True)
@@ -1167,10 +1143,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
     if not ae.empty:
         display = ae.copy()
         display["Planned_FCFA"] = display["Doctor"].apply(
-            lambda d: plan_agg.loc[
-                plan_agg["Doctor"] == (fuzzy_match(d, plan_doctors) or ""),
-                "Planned_FCFA"
-            ].sum() if plan_doctors else 0
+            lambda d: plan_agg.loc[plan_agg["Doctor"] == d, "Planned_FCFA"].sum() if not plan_agg.empty else 0
         )
         display["Planned"] = display["Planned_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
         display["Actual"]  = display["Amount_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
@@ -1207,14 +1180,16 @@ def render_tab3(monthly_data, expense_data, visit_data, currency):
         return
 
     # Build spend per MR_ID from normalized MR_IDs column
-    # Joint entries ("MR_006,MR_002") are split and each gets the full amount
+    # Joint entries ("MR_006,MR_002") are split and the amount is split equally
     mr_spend_map = {}  # MR_ID -> FCFA
     if not ae.empty and "MR_IDs" in ae.columns:
         for _, row in ae.iterrows():
-            for mr_id in str(row["MR_IDs"]).split(","):
-                mr_id = mr_id.strip()
-                if mr_id and mr_id not in ("UNKNOWN",):
-                    mr_spend_map[mr_id] = mr_spend_map.get(mr_id, 0) + row["Amount_FCFA"]
+            mr_ids = [i.strip() for i in str(row["MR_IDs"]).split(",") if i.strip() and i.strip() != "UNKNOWN"]
+            if not mr_ids:
+                continue
+            split_amount = row["Amount_FCFA"] / len(mr_ids)
+            for mr_id in mr_ids:
+                mr_spend_map[mr_id] = mr_spend_map.get(mr_id, 0) + split_amount
 
     # Build visit count per MR_ID from normalized visit tracker
     visit_count_map = {}  # MR_ID -> count
@@ -1393,19 +1368,25 @@ def render_tab4(expense_data, monthly_data, currency):
     # Stacked bar: CM vs MR vs Agent vs Other (using normalized MR_IDs)
     st.subheader("📊 Spend Breakdown by Category")
     if not ae.empty and "MR_IDs" in ae.columns:
-        def classify_spend(mr_ids_str):
-            ids = [i.strip() for i in str(mr_ids_str).split(",")]
-            if "MR_006" in ids:
+        # To avoid duplication for joint entries (e.g. JITENDRA/CLEMANCE), explode the MR_IDs
+        # and distribute the Amount_FCFA evenly
+        ae_exploded = ae.copy()
+        ae_exploded['MR_ID_List'] = ae_exploded['MR_IDs'].apply(lambda x: [i.strip() for i in str(x).split(",") if i.strip()])
+        ae_exploded['Num_MRs'] = ae_exploded['MR_ID_List'].apply(lambda x: max(1, len(x)))
+        ae_exploded = ae_exploded.explode('MR_ID_List')
+        ae_exploded['Amount_FCFA'] = ae_exploded['Amount_FCFA'] / ae_exploded['Num_MRs']
+
+        def classify_spend(mr_id):
+            if mr_id == "MR_006":
                 return "CM Direct"
-            if "AGT_001" in ids:
+            if mr_id == "AGT_001":
                 return "Agent (ARRA BEHOU)"
-            non_cm = [i for i in ids if i not in ("MR_006", "AGT_001", "UNKNOWN")]
-            if non_cm:
+            if mr_id not in ("UNKNOWN",):
                 return "MR Attributed"
             return "Other"
-        ae_copy = ae.copy()
-        ae_copy["SpendType"] = ae_copy["MR_IDs"].apply(classify_spend)
-        spend_by_type = ae_copy.groupby("SpendType")["Amount_FCFA"].sum().reset_index()
+
+        ae_exploded["SpendType"] = ae_exploded["MR_ID_List"].apply(classify_spend)
+        spend_by_type = ae_exploded.groupby("SpendType")["Amount_FCFA"].sum().reset_index()
     else:
         spend_by_type = pd.DataFrame(columns=["SpendType","Amount_FCFA"])
 
