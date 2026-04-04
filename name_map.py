@@ -313,13 +313,18 @@ def territory_display_name(zone_id: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# 5. DOCTOR NAMES — Fuzzy only (1000+ names, no hard map)
+# 5. DOCTOR NAMES
 # ─────────────────────────────────────────────────────────────
-# Strategy: build canonical list from visit trackers (ground truth),
-# then fuzzy-match everything else against it at runtime.
-# Call build_doctor_index(visit_tracker_dfs) once at startup.
 
-_DOCTOR_INDEX = []  # populated at runtime
+DOCTOR_CANONICAL = {
+    # e.g., "DOC_001": "DR. JOHN DOE",
+}
+
+DOCTOR_OVERRIDES = {
+    # e.g., "JOHN DOE": "DOC_001",
+}
+
+_DOCTOR_INDEX = []  # dynamically populated at runtime
 
 def build_doctor_index(doctor_names: list):
     """
@@ -337,18 +342,25 @@ def build_doctor_index(doctor_names: list):
 
 def normalize_doctor(raw: str, threshold: int = 72) -> str:
     """
-    Returns closest canonical doctor name from visit tracker index.
-    Falls back to cleaned raw name if no match above threshold.
+    Returns closest canonical doctor name using exact mapping first,
+    then visit tracker index fuzzy match. Falls back to cleaned raw name.
     """
     if not raw or str(raw).strip() in ("", "nan"):
         return "UNKNOWN"
-    clean = str(raw).strip()
+    clean = str(raw).strip().upper()
+
+    if clean in DOCTOR_OVERRIDES:
+        doc_id = DOCTOR_OVERRIDES[clean]
+        return DOCTOR_CANONICAL.get(doc_id, doc_id)
+
+    clean_original_case = str(raw).strip()
     if not _DOCTOR_INDEX:
-        return clean  # index not built yet, return as-is
+        return clean_original_case  # index not built yet, return as-is
+
     match, score, _ = process.extractOne(
-        clean, _DOCTOR_INDEX, scorer=fuzz.token_sort_ratio
+        clean_original_case, _DOCTOR_INDEX, scorer=fuzz.token_sort_ratio
     )
-    return match if score >= threshold else clean
+    return match if score >= threshold else clean_original_case
 
 
 # ─────────────────────────────────────────────────────────────
