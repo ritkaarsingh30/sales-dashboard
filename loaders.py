@@ -12,7 +12,7 @@ from constants import DISTRIBUTORS
 from utils import safe_num
 from name_map import (
     normalize_mr, mr_display_name,
-    normalize_product,
+    normalize_product, parse_multi_products,
     normalize_activity, activity_display_name,
     normalize_territory,
     normalize_doctor,
@@ -121,7 +121,7 @@ def load_projection(file_bytes: bytes) -> dict:
             "Area": normalize_territory(str(row.iloc[5]).strip()),
             "Activity": normalize_activity(str(row.iloc[6]).strip()),
             "Amount_FCFA": safe_num(row.iloc[7]),
-            "Focus_Products": normalize_product(str(row.iloc[8]).strip()),
+            "Focus_Products": parse_multi_products(str(row.iloc[8]).strip()),
         })
     act_df = pd.DataFrame(act_rows)
     return {"projection": proj_df, "activity_plan": act_df}
@@ -169,17 +169,27 @@ def load_expense(file_bytes: bytes) -> dict:
     total_received_fcfa = 0
     total_spent_fcfa = 0
     balance_fcfa = 0
+    opening_balance_fcfa = 0
+    new_budget_fcfa = 0
     for i, row in raw_mr.iterrows():
         label = str(row.iloc[0]).upper()
+        col1_label = str(row.iloc[1]).upper() if len(row) > 1 else ""
         col5  = str(row.iloc[5]).upper() if len(row) > 5 else ""
+
+        if "OPENING BALANCE" in col1_label:
+            opening_balance_fcfa = safe_num(row.iloc[2]) if len(row) > 2 else 0
+        elif "RECEIVED ACTIVITY MONEY" in col1_label or "RECEIVED" in col1_label:
+            new_budget_fcfa = safe_num(row.iloc[2]) if len(row) > 2 else 0
+
         if "TOTAL" in label and ("RECEIV" in label or "FCFA" in label):
-            v = safe_num(row.iloc[2])
+            v = safe_num(row.iloc[2]) if len(row) > 2 else 0
             if v > 0:
                 total_received_fcfa = v
         if "TOTAL SPENT" in col5:
-            total_spent_fcfa = safe_num(row.iloc[6])
+            total_spent_fcfa = safe_num(row.iloc[6]) if len(row) > 6 else 0
         if "BALANCE" in col5:
-            balance_fcfa = safe_num(row.iloc[6])
+            balance_fcfa = safe_num(row.iloc[6]) if len(row) > 6 else 0
+            
     if total_received_fcfa == 0 and not mr_df.empty:
         total_received_fcfa = mr_df["Amount_FCFA"].sum()
 
@@ -204,7 +214,7 @@ def load_expense(file_bytes: bytes) -> dict:
             "Speciality": str(row.iloc[3]).strip(),
             "Activity": str(row.iloc[4]).strip(),
             "Activity_ID": normalize_activity(str(row.iloc[4]).strip()),
-            "Products": normalize_product(str(row.iloc[5]).strip()),
+            "Products": parse_multi_products(str(row.iloc[5]).strip()),
             "Amount_FCFA": safe_num(row.iloc[6]),
             "Contact": str(row.iloc[7]).strip(),
             "Responsible": raw_resp,
@@ -240,6 +250,8 @@ def load_expense(file_bytes: bytes) -> dict:
         "activity_exp": ae_df,
         "other_exp": oe_df,
         "money_received": mr_df,
+        "opening_balance_fcfa": opening_balance_fcfa,
+        "new_budget_fcfa": new_budget_fcfa,
         "total_received_fcfa": total_received_fcfa,
         "total_spent_fcfa": total_spent_fcfa,
         "balance_fcfa": balance_fcfa,

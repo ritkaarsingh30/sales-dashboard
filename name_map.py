@@ -217,6 +217,22 @@ def product_display_name(product_id: str) -> str:
 def product_category(product_id: str) -> str:
     return PRODUCT_CATEGORIES.get(product_id, "UNKNOWN")
 
+def parse_multi_products(raw_str: str) -> str:
+    """Parses a slash-separated string of products, mapping them to their display names."""
+    if not raw_str or str(raw_str).strip() in ("nan", ""):
+        return "UNKNOWN"
+    names = []
+    for p in str(raw_str).split("/"):
+        p = p.strip()
+        if not p:
+            continue
+        pid = normalize_product(p)
+        if pid in ("UNKNOWN", "EXCLUDED"):
+            names.append(p)  # fallback to the raw text so we don't lose data
+        else:
+            names.append(product_display_name(pid))
+    return " / ".join(names)
+
 
 # ─────────────────────────────────────────────────────────────
 # 3. ACTIVITY TYPES

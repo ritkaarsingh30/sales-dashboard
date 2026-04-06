@@ -18,25 +18,20 @@ def render_tab4(expense_data, monthly_data, currency):
     ae = expense_data["activity_exp"]
     oe = expense_data["other_exp"]
     mr = expense_data["money_received"]
+    opening     = expense_data.get("opening_balance_fcfa", 0)
+    received    = expense_data.get("new_budget_fcfa", 0)
     total_recv  = expense_data["total_received_fcfa"]
     total_spent = expense_data["total_spent_fcfa"]
     balance     = expense_data["balance_fcfa"]
     mul = 1 if currency == "FCFA" else (1 / FCFA_TO_EUR)
     unit = currency
 
-    util_pct = (total_spent / total_recv * 100) if total_recv else 0
-
     kpi_row([
-        {"label": "Budget Received",
-         "value": fmt_currency(total_recv * mul, unit), "color": CLR_TEAL},
-        {"label": "Total Spent",
-         "value": fmt_currency(total_spent * mul, unit), "color": CLR_ORANGE},
-        {"label": "Balance",
-         "value": fmt_currency(balance * mul, unit),
-         "color": CLR_GREEN if balance >= 0 else CLR_RED},
-        {"label": "Utilisation %",
-         "value": f"{util_pct:.1f}%",
-         "color": CLR_GREEN if util_pct <= 100 else CLR_RED},
+        {"label": "Opening", "value": fmt_currency(opening * mul, unit), "color": CLR_TEAL},
+        {"label": "+ Received", "value": fmt_currency(received * mul, unit), "color": CLR_TEAL},
+        {"label": "= Total Budget", "value": fmt_currency((opening + received) * mul, unit), "color": CLR_BLUE},
+        {"label": "- Spent", "value": fmt_currency(total_spent * mul, unit), "color": CLR_ORANGE},
+        {"label": "= Balance", "value": fmt_currency(balance * mul, unit), "color": CLR_GREEN if balance >= 0 else CLR_RED},
     ])
     st.markdown("---")
 
@@ -44,21 +39,21 @@ def render_tab4(expense_data, monthly_data, currency):
     st.subheader("💰 Budget Flow")
     col1, col2 = st.columns([1, 2])
     with col1:
-        flow_df = pd.DataFrame({
-            "Category": ["Received", "Spent", "Balance"],
-            "Amount":   [total_recv * mul, total_spent * mul, balance * mul],
-            "Color":    [CLR_TEAL, CLR_ORANGE, CLR_GREEN if balance >= 0 else CLR_RED],
-        })
-        fig_flow = go.Figure(go.Bar(
-            x=flow_df["Category"], y=flow_df["Amount"],
-            marker_color=flow_df["Color"],
-            text=[fmt_currency(v, unit) for v in flow_df["Amount"]],
+        fig_flow = go.Figure(go.Waterfall(
+            name="Budget", orientation="v",
+            measure=["relative", "relative", "total", "relative", "total"],
+            x=["Opening", "+ Received", "= Total Budget", "- Spent", "= Balance"],
+            y=[opening * mul, received * mul, 0, -total_spent * mul, 0],
+            text=[fmt_currency(opening*mul, unit), fmt_currency(received*mul, unit), fmt_currency((opening+received)*mul, unit), f"-{fmt_currency(total_spent*mul, unit)}", fmt_currency(balance*mul, unit)],
             textposition="outside",
+            decreasing={"marker":{"color": CLR_ORANGE}},
+            increasing={"marker":{"color": CLR_TEAL}},
+            totals={"marker":{"color": CLR_BLUE}}
         ))
-        fig_flow.update_layout(template=TEMPLATE, height=340,
+        fig_flow.update_layout(template=TEMPLATE, height=360,
                                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                               margin=dict(t=20, b=20), yaxis_title=f"Amount ({unit})")
-        st.plotly_chart(fig_flow, width='stretch')
+                               margin=dict(t=20, b=20), yaxis_title=f"Amount ({unit})", showlegend=False)
+        st.plotly_chart(fig_flow, use_container_width=True)
 
     with col2:
         st.markdown("**Cumulative Spend Over Feb**")
