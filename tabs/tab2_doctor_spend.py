@@ -5,10 +5,11 @@ Tab 2 — Doctor Spend
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+import pandas as pd
 
 from constants import FCFA_TO_EUR, TEMPLATE, CLR_BLUE, CLR_ORANGE, CLR_GREEN, CLR_RED
+from name_map import mr_display_name, MR_CANONICAL
 from utils import fmt_currency, kpi_row
-
 
 def render_tab2(proj_data, expense_data, copy_data, currency):
     act_plan = proj_data["activity_plan"]
@@ -54,7 +55,7 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
                               xaxis_title=f"Amount ({unit})",
                               margin=dict(l=180, t=20, b=20),
                               legend=dict(orientation="h", y=1.05))
-        st.plotly_chart(fig_doc, width='stretch')
+        st.plotly_chart(fig_doc, use_container_width=True)
     st.markdown("---")
 
     # ── Spend Breakdown: donut + by MR ──
@@ -71,20 +72,30 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
             fig_donut.update_traces(textposition="outside", textinfo="percent+label")
             fig_donut.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                     margin=dict(t=20, b=20), showlegend=False)
-            st.plotly_chart(fig_donut, width='stretch')
+            st.plotly_chart(fig_donut, use_container_width=True)
     with col2:
-        st.markdown("**By Responsible MR**")
-        if not ae.empty:
-            mr_spend = ae.groupby("Responsible")["Amount_FCFA"].sum().reset_index()
-            mr_spend["Amount"] = mr_spend["Amount_FCFA"] * mul
-            mr_spend = mr_spend.sort_values("Amount", ascending=False)
-            fig_mr = px.bar(mr_spend, x="Responsible", y="Amount",
-                            template=TEMPLATE, height=360,
-                            color="Amount", color_continuous_scale="Blues",
-                            labels={"Amount": f"({unit})", "Responsible": "MR / CM"})
-            fig_mr.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                                 margin=dict(t=20, b=60), xaxis_tickangle=-30, showlegend=False)
-            st.plotly_chart(fig_mr, width='stretch')
+        st.markdown("**By Responsible MR (Attributed)**")
+        if not ae.empty and "MR_IDs" in ae.columns:
+            individual_mr_spend = {}
+            for _, row in ae.iterrows():
+                ids = [i.strip() for i in row["MR_IDs"].split(",") if i.strip()]
+                share = row["Amount_FCFA_Share"]
+                for mid in ids:
+                    name = mr_display_name(mid) if mid in MR_CANONICAL else mid
+                    individual_mr_spend[name] = individual_mr_spend.get(name, 0) + share
+            
+            mr_plot_df = pd.DataFrame([{"MR": k, "Amount": v * mul} for k, v in individual_mr_spend.items()])
+            if not mr_plot_df.empty:
+                mr_plot_df = mr_plot_df.sort_values("Amount", ascending=False)
+                fig_mr = px.bar(mr_plot_df, x="MR", y="Amount",
+                                template=TEMPLATE, height=360,
+                                color="Amount", color_continuous_scale="Blues",
+                                labels={"Amount": f"({unit})", "MR": "MR / CM"})
+                fig_mr.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                                     margin=dict(t=20, b=60), xaxis_tickangle=-30, showlegend=False)
+                st.plotly_chart(fig_mr, use_container_width=True)
+            else:
+                st.info("No MR attribution data found.")
     st.markdown("---")
 
     # ── Detail Table ──
@@ -96,10 +107,10 @@ def render_tab2(proj_data, expense_data, copy_data, currency):
             if not plan_agg.empty else 0
         )
         display["Planned"] = display["Planned_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
-        display["Actual"]  = display["Amount_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
+        display["Actual"]  = display["Amount_FCFA_Share"].apply(lambda v: fmt_currency(v*mul, unit))
         st.dataframe(
             display[["Doctor","Hospital","Speciality","Activity",
                       "Products","Planned","Actual","Responsible"]].rename(columns={
-                "Planned": f"Planned ({unit})", "Actual": f"Actual ({unit})",
-                "Responsible": "MR"}),
+                "Planned": f"Planned ({unit})", "Actual": f"Actual Share ({unit})",
+                "Responsible": "Responsible"}),
             width='stretch', hide_index=True)

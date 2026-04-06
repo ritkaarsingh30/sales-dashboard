@@ -122,7 +122,7 @@ def render_tab4(expense_data, monthly_data, currency):
     if not ae.empty and "MR_IDs" in ae.columns:
         cm_df = ae[ae["MR_IDs"].str.contains("MR_006", na=False)].copy()
         if not cm_df.empty:
-            cm_df["Amount"] = cm_df["Amount_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
+            cm_df["Amount"] = cm_df["Amount_FCFA_Share"].apply(lambda v: fmt_currency(v*mul, unit))
             st.dataframe(
                 cm_df[["Doctor","Hospital","Speciality","Activity","Products","Amount","Responsible"]]
                     .rename(columns={"Amount": f"Amount ({unit})"}),
@@ -136,9 +136,9 @@ def render_tab4(expense_data, monthly_data, currency):
     if not ae.empty and "MR_IDs" in ae.columns:
         agent_df = ae[ae["MR_IDs"].str.contains("AGT_001", na=False)].copy()
         if not agent_df.empty:
-            agent_df["Amount"] = agent_df["Amount_FCFA"].apply(lambda v: fmt_currency(v*mul, unit))
-            agent_total = agent_df["Amount_FCFA"].sum()
-            st.caption(f"Total Agent Spend: **{fmt_currency(agent_total*mul, unit)}**")
+            agent_df["Amount"] = agent_df["Amount_FCFA_Share"].apply(lambda v: fmt_currency(v*mul, unit))
+            agent_total = agent_df["Amount_FCFA_Share"].sum()
+            st.caption(f"Total Agent Spend Share: **{fmt_currency(agent_total*mul, unit)}**")
             st.dataframe(
                 agent_df[["Doctor","Hospital","Speciality","Activity","Products","Amount"]]
                     .rename(columns={"Amount": f"Amount ({unit})"}),

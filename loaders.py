@@ -207,6 +207,8 @@ def load_expense(file_bytes: bytes) -> dict:
             mr_ids = ",".join(normalize_mr(p.strip()) for p in raw_resp.split("/"))
         else:
             mr_ids = normalize_mr(raw_resp)
+        num_mrs = len([i.strip() for i in mr_ids.split(",") if i.strip()])
+        num_mrs = max(1, num_mrs)
         ae_rows.append({
             "SN": int(sn),
             "Doctor": normalize_doctor(str(row.iloc[1]).strip()),
@@ -216,9 +218,11 @@ def load_expense(file_bytes: bytes) -> dict:
             "Activity_ID": normalize_activity(str(row.iloc[4]).strip()),
             "Products": parse_multi_products(str(row.iloc[5]).strip()),
             "Amount_FCFA": safe_num(row.iloc[6]),
+            "Amount_FCFA_Share": safe_num(row.iloc[6]) / num_mrs,
             "Contact": str(row.iloc[7]).strip(),
             "Responsible": raw_resp,
             "MR_IDs": mr_ids,
+            "Num_MRs": num_mrs,
         })
     ae_df = pd.DataFrame(ae_rows)
     ae_df["Activity"] = ae_df["Activity_ID"].apply(activity_display_name)

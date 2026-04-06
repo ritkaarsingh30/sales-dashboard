@@ -40,7 +40,7 @@ def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency
                       if i.strip() and i.strip() != "UNKNOWN"]
             if not mr_ids:
                 continue
-            split_amount = row["Amount_FCFA"] / len(mr_ids)
+            split_amount = row.get("Amount_FCFA_Share", row["Amount_FCFA"] / len(mr_ids))
             for mr_id in mr_ids:
                 mr_spend_map[mr_id] = mr_spend_map.get(mr_id, 0) + split_amount
 

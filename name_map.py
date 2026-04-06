@@ -80,7 +80,7 @@ def normalize_mr(raw: str) -> str:
     
     # Fuzzy fallback — strip common prefixes before matching
     stripped = clean_upper
-    for prefix in ["MME ", "MR. ", "MR ", "MS. ", "MS ", "IN LIST OF "]:
+    for prefix in ["MME ", "MR. ", "MR ", "IN LIST OF "]:
         stripped = stripped.replace(prefix, "")
     stripped = stripped.strip()
     
