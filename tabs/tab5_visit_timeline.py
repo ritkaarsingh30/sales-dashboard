@@ -58,23 +58,6 @@ def render_tab5(visit_data):
         st.plotly_chart(fig_hm, width='stretch')
     st.markdown("---")
 
-    # ── Doctor Repeat Visits (>2) ──
-    st.subheader("🔄 Doctor Repeat Visits (> 2 times)")
-    if not month_visits.empty:
-        repeat_visits = (
-            month_visits.groupby(["Doctor", "Clinic", "Speciality"])
-            .size().reset_index(name="Visits")
-        )
-        repeat_visits = repeat_visits[repeat_visits["Visits"] > 2].sort_values("Visits", ascending=False)
-        if not repeat_visits.empty:
-            st.dataframe(repeat_visits.rename(columns={"Visits": "Total Visits"}),
-                         width='stretch', hide_index=True)
-        else:
-            st.info("No doctors were visited more than 2 times this month.")
-    else:
-        st.info("No visit data available to calculate repeat visits.")
-    st.markdown("---")
-
     # ── Detail Table ──
     st.subheader("📋 Visit Details")
     if not filtered.empty:

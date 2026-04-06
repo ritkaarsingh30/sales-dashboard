@@ -9,7 +9,7 @@ import pandas as pd
 
 from constants import (
     FCFA_TO_EUR, TEMPLATE, _NON_MR_IDS,
-    CLR_BLUE, CLR_TEAL, CLR_GREEN, CLR_ORANGE, CLR_PURPLE,
+    CLR_BLUE, CLR_TEAL, CLR_GREEN, CLR_ORANGE, CLR_PURPLE, CLR_RED
 )
 from utils import fmt_currency, kpi_row
 from name_map import MR_CANONICAL, mr_display_name, normalize_territory, territory_display_name
@@ -44,58 +44,160 @@ def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency
             for mr_id in mr_ids:
                 mr_spend_map[mr_id] = mr_spend_map.get(mr_id, 0) + split_amount
 
-    # ── Build visit count map ──
+    # ── Build visit count map (Verified visits) ──
     visit_count_map = {}
     if not visits.empty and "MR_ID" in visits.columns:
+        # If there is a Month column, prioritize Feb, but we aggregate all if not specified.
         feb_visits = visits[visits["Month"] == "Feb"] if "Month" in visits.columns else visits
         visit_count_map = feb_visits.groupby("MR_ID").size().to_dict()
 
-    # ── Per-MR KPI cards ──
-    st.subheader("👥 MR Individual KPIs")
+    st.header("👥 Individual MR Reports")
+
     for _, row in field_delegates.iterrows():
         mr_id = row["MR_ID"]
         display_name = mr_display_name(mr_id) if mr_id in MR_CANONICAL else row["Delegate"]
         spend = mr_spend_map.get(mr_id, 0)
         territory = territory_display_name(normalize_territory(row["Territory"]))
-        st.markdown(f"##### {display_name} — *{territory}*")
-        kpi_row([
-            {"label": "Total Calls",      "value": f"{int(row['TotalCalls'])}",   "color": CLR_BLUE},
-            {"label": "Prescriber Calls", "value": f"{int(row['Prescriber'])}",   "color": CLR_TEAL},
-            {"label": "Drs Converted",    "value": f"{int(row['DrsConverted'])}", "color": CLR_GREEN},
-            {"label": "Days Worked",
-             "value": f"{int(row['DaysWorked'])}/{int(row['DaysTarget'])}",
-             "color": CLR_ORANGE},
-            {"label": f"Spend ({unit})",  "value": fmt_currency(spend*mul, unit), "color": CLR_PURPLE},
-        ])
-        st.markdown("")
-    st.markdown("---")
 
-    # ── Reported vs Verified ──
-    st.subheader("📊 Reported vs Verified Visits per MR")
-    if not visits.empty:
-        comparison = pd.DataFrame([
-            {"MR": mr_display_name(row["MR_ID"]) if row["MR_ID"] in MR_CANONICAL else row["Delegate"],
-             "Reported (Self)": int(row["TotalCalls"]),
-             "Verified (Tracker)": visit_count_map.get(row["MR_ID"], 0)}
-            for _, row in field_delegates.iterrows()
-        ])
-        fig_cmp = go.Figure()
-        fig_cmp.add_bar(name="Reported (Self)", x=comparison["MR"],
-                        y=comparison["Reported (Self)"], marker_color=CLR_ORANGE)
-        fig_cmp.add_bar(name="Verified (Tracker)", x=comparison["MR"],
-                        y=comparison["Verified (Tracker)"], marker_color=CLR_TEAL)
-        fig_cmp.update_layout(barmode="group", template=TEMPLATE, height=360,
-                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                              xaxis_tickangle=-15, margin=dict(t=20, b=60),
-                              legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(fig_cmp, width='stretch')
-    else:
-        st.info("Upload Visit Tracker to see verified calls.")
-    st.markdown("---")
+        # Check for unmapped MRs and assign them gracefully
+        if mr_id == "UNKNOWN":
+            continue
 
-    # ── Spend & Converted charts ──
-    col1, col2 = st.columns(2)
-    with col1:
+        with st.container():
+            st.markdown(f"""
+            <div style="background-color:rgba(76,159,255,0.05); padding: 12px 16px; border-left: 4px solid #4C9FFF; border-radius: 4px; margin-bottom: 12px;">
+                <h3 style="margin:0; color: #4C9FFF;">{display_name} <span style="font-size: 16px; color:#8899aa; font-weight: normal;">— {territory}</span></h3>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # --- 1. KPI Row ---
+            kpi_row([
+                {"label": "Total Calls",      "value": f"{int(row['TotalCalls'])}",   "color": CLR_BLUE},
+                {"label": "Prescriber Calls", "value": f"{int(row['Prescriber'])}",   "color": CLR_TEAL},
+                {"label": "Drs Converted",    "value": f"{int(row['DrsConverted'])}", "color": CLR_GREEN},
+                {"label": "Days Worked",      "value": f"{int(row['DaysWorked'])} / {int(row['DaysTarget'])}", "color": CLR_ORANGE},
+                {"label": f"Spend ({unit})",  "value": fmt_currency(spend*mul, unit), "color": CLR_PURPLE},
+            ])
+
+            # --- 2. Tour Plan Coverage & Verified Visits ---
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("##### 📍 Reported vs Verified Visits")
+                rep = int(row["TotalCalls"])
+                ver = visit_count_map.get(mr_id, 0)
+                
+                # Simple progress comparison
+                pct_verified = (ver / rep * 100) if rep > 0 else 0
+                st.write(f"**Reported (Self):** {rep}")
+                st.write(f"**Verified (Tracker):** {ver} *({pct_verified:.1f}% tracking rate)*")
+
+            with col2:
+                st.markdown("##### 🗺️ Tour Programme Coverage")
+                if tour_plan_data is not None and not tour_plan_data.empty:
+                    mr_tp = tour_plan_data[tour_plan_data["MR"] == mr_id]
+                    if not mr_tp.empty:
+                        planned = len(mr_tp)
+                        covered = mr_tp["Covered"].sum()
+                        pct = (covered / planned * 100) if planned > 0 else 0
+                        st.write(f"**Total Days Planned:** {planned}")
+                        st.write(f"**Days Actual Area == Planned Area:** {covered} ")
+                        st.write(f"**Compliance Rate:** {pct:.1f}%")
+                    else:
+                        st.info("No Tour Plan data mapped for this MR.")
+                else:
+                    st.info("Tour Plan file not uploaded.")
+
+            # --- 3. Tour Plan Details ---
+            st.markdown("---")
+            st.markdown("##### 📍 Detailed Tour Plan Status")
+            if tour_plan_data is not None and not tour_plan_data.empty:
+                mr_tp = tour_plan_data[tour_plan_data["MR"] == mr_id]
+                if not mr_tp.empty:
+                    col_tp1, col_tp2 = st.columns([1, 1.5])
+                    tp_detail = mr_tp.sort_values("Date").copy()
+                    tp_detail["Status"] = tp_detail["Covered"].apply(lambda c: "Covered" if c else "Missed Area")
+                    
+                    with col_tp1:
+                        # Graph: Donut chart for summary compliance
+                        status_counts = tp_detail["Status"].value_counts().reset_index()
+                        status_counts.columns = ["Status", "Days"]
+                        fig_tp = px.pie(
+                            status_counts, names="Status", values="Days", hole=0.5,
+                            color="Status", color_discrete_map={"Covered": CLR_GREEN, "Missed Area": CLR_RED}
+                        )
+                        fig_tp.update_layout(
+                            template=TEMPLATE, height=220,
+                            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                            margin=dict(t=10, b=10, l=10, r=10),
+                            showlegend=True, legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="right", x=1)
+                        )
+                        st.plotly_chart(fig_tp, use_container_width=True)
+                    
+                    with col_tp2:
+                        # Table: Detailed History
+                        tp_detail['Date'] = pd.to_datetime(tp_detail['Date']).dt.strftime('%d %b')
+                        st.dataframe(
+                            tp_detail[['Date', 'Joint_Working', 'Planned_Area', 'Actual_Area', 'Covered']].rename(
+                                columns={'Planned_Area': 'Planned Area', 'Actual_Area': 'Actual Area', 'Joint_Working': 'Joint Working'}
+                            ),
+                            use_container_width=True, hide_index=True, height=200
+                        )
+                else:
+                    st.caption("No Detailed Plan Available.")
+            else:
+                st.caption("Provide Tour Plan file to render details.")
+            
+            # --- 4. Doctor Repeat Visits ---
+            st.markdown("---")
+            st.markdown("##### 🔄 Doctors Visited > 1 Time (Repeats)")
+            if not visits.empty:
+                mr_visits = visits[visits["MR_ID"] == mr_id]
+                if not mr_visits.empty:
+                    repeat_visits = (
+                        mr_visits.groupby(["Doctor", "Clinic", "Speciality"])
+                        .size().reset_index(name="Visits")
+                    )
+                    repeat_visits = repeat_visits[repeat_visits["Visits"] > 1].sort_values("Visits", ascending=True)
+                    if not repeat_visits.empty:
+                        repeat_visits["DocLabel"] = repeat_visits.apply(
+                            lambda r: f"{r['Doctor']} ({str(r['Clinic'])[:10]}...)" if r['Clinic'] and len(str(r['Clinic'])) > 10 else f"{r['Doctor']}", axis=1
+                        )
+                        # Render as a Treemap to fit all doctors dynamically (Full Width, Larger Height)
+                        fig_rv = px.treemap(
+                            repeat_visits,
+                            path=[px.Constant("Doctors"), "DocLabel"],
+                            values="Visits",
+                            color="Visits",
+                            color_continuous_scale="Teal",
+                            hover_data={"Doctor": True, "Clinic": True, "Speciality": True, "Visits": True, "DocLabel": False},
+                        )
+                        fig_rv.update_layout(
+                            template=TEMPLATE, height=400,
+                            margin=dict(t=20, b=10, l=10, r=10)
+                        )
+                        fig_rv.update_traces(marker=dict(line=dict(width=1, color="#1a2535")))
+                        st.plotly_chart(fig_rv, use_container_width=True)
+                        
+                        # Table beneath chart (show all descending)
+                        st.dataframe(
+                            repeat_visits.sort_values("Visits", ascending=False).rename(columns={"Visits": "Total Visits"}).drop(columns=["DocLabel"]),
+                            use_container_width=True, hide_index=True, height=200
+                        )
+                    else:
+                        st.info("No repeated visits (>1) recorded for this MR.")
+                else:
+                    st.caption("No Visit Tracker entries matched to this MR.")
+            else:
+                st.caption("Provide Visit Tracker file to render repeat data.")
+
+        st.markdown("---")
+
+    # ── Comparative Analytics (Aggregate) ──
+    st.header("📈 MR Comparative Analytics")
+
+    col_cmp1, col_cmp2 = st.columns(2)
+    with col_cmp1:
         st.subheader("💸 Total Spend per MR")
         spend_df = pd.DataFrame([
             {"MR": mr_display_name(k), "Spend": v*mul}
@@ -110,7 +212,8 @@ def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency
             st.plotly_chart(fig_sp, width='stretch')
         else:
             st.info("No MR spend data.")
-    with col2:
+            
+    with col_cmp2:
         st.subheader("🩺 Doctors Converted per MR")
         conv = field_delegates[["Delegate","DrsConverted"]].copy()
         conv["MR"] = field_delegates["MR_ID"].apply(
@@ -122,11 +225,13 @@ def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency
         fig_conv.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20)
         st.plotly_chart(fig_conv, width='stretch')
+
     st.markdown("---")
 
     # ── Summary Table ──
-    st.subheader("📋 MR Summary Table")
+    st.subheader("📋 Overall MR Summary Table")
     summary = field_delegates.copy()
+    summary = summary[summary["MR_ID"] != "UNKNOWN"]
     summary["Display"] = summary["MR_ID"].apply(
         lambda i: mr_display_name(i) if i in MR_CANONICAL
         else summary.loc[summary["MR_ID"]==i, "Delegate"].values[0]
@@ -142,47 +247,3 @@ def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency
             "DrsConverted":"Drs Converted", "DaysWorked":"Days Worked",
             "Spend": f"Spend ({unit})"}),
         width='stretch', hide_index=True)
-    st.markdown("---")
-
-    # ── Tour Program Coverage ──
-    st.subheader("🗺️ Tour Program Coverage (Planned vs Actual Area)")
-    if tour_plan_data is not None and not tour_plan_data.empty:
-        tp_mr = tour_plan_data.groupby('MR').agg(
-            Total_Plans=('MR', 'count'),
-            Covered_Plans=('Covered', 'sum')
-        ).reset_index()
-        tp_mr['Coverage_%'] = (tp_mr['Covered_Plans'] / tp_mr['Total_Plans'] * 100).round(1)
-        tp_mr['MR_Display'] = tp_mr['MR'].apply(
-            lambda i: mr_display_name(i) if i in MR_CANONICAL else i)
-
-        col_tp1, col_tp2 = st.columns([1, 2])
-        with col_tp1:
-            st.dataframe(
-                tp_mr[['MR_Display','Total_Plans','Covered_Plans','Coverage_%']].rename(columns={
-                    'MR_Display': 'MR', 'Total_Plans': 'Total Days Planned',
-                    'Covered_Plans': 'Days Covered Area', 'Coverage_%': 'Coverage %'
-                }),
-                width='stretch', hide_index=True)
-        with col_tp2:
-            fig_tp = px.bar(tp_mr, x="MR_Display", y="Coverage_%", template=TEMPLATE, height=340,
-                            color="Coverage_%", color_continuous_scale="Teal",
-                            labels={"Coverage_%": "Coverage %", "MR_Display": "MR"})
-            fig_tp.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                                 margin=dict(t=20, b=60), showlegend=False, xaxis_tickangle=-20)
-            st.plotly_chart(fig_tp, width='stretch')
-
-        st.markdown("**Detail: Tour Plan Coverage**")
-        tp_detail = tour_plan_data.copy()
-        tp_detail['MR'] = tp_detail['MR'].apply(
-            lambda i: mr_display_name(i) if i in MR_CANONICAL else i)
-        import pandas as _pd
-        tp_detail['Date'] = _pd.to_datetime(tp_detail['Date']).dt.strftime('%Y-%m-%d')
-        st.dataframe(
-            tp_detail.rename(columns={
-                'Planned_Area': 'Planned Area',
-                'Actual_Area': 'Actual Area',
-                'Joint_Working': 'Joint Working'
-            }),
-            width='stretch', hide_index=True)
-    else:
-        st.info("Upload 'Tour Plan' file to see area coverage metrics.")
