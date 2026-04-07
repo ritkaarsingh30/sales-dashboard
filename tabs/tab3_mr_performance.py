@@ -79,34 +79,22 @@ def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency
                 {"label": f"Spend ({unit})",  "value": fmt_currency(spend*mul, unit), "color": CLR_PURPLE},
             ])
 
-            # --- 2. Tour Plan Coverage & Verified Visits ---
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("##### 📍 Reported vs Verified Visits")
-                rep = int(row["TotalCalls"])
-                ver = visit_count_map.get(mr_id, 0)
-                
-                # Simple progress comparison
-                pct_verified = (ver / rep * 100) if rep > 0 else 0
-                st.write(f"**Reported (Self):** {rep}")
-                st.write(f"**Verified (Tracker):** {ver} *({pct_verified:.1f}% tracking rate)*")
-
-            with col2:
-                st.markdown("##### 🗺️ Tour Programme Coverage")
-                if tour_plan_data is not None and not tour_plan_data.empty:
-                    mr_tp = tour_plan_data[tour_plan_data["MR"] == mr_id]
-                    if not mr_tp.empty:
-                        planned = len(mr_tp)
-                        covered = mr_tp["Covered"].sum()
-                        pct = (covered / planned * 100) if planned > 0 else 0
-                        st.write(f"**Total Days Planned:** {planned}")
-                        st.write(f"**Days Actual Area == Planned Area:** {covered} ")
-                        st.write(f"**Compliance Rate:** {pct:.1f}%")
-                    else:
-                        st.info("No Tour Plan data mapped for this MR.")
+            # --- 2. Tour Plan Coverage ---
+            st.markdown("##### 🗺️ Tour Programme Coverage")
+            if tour_plan_data is not None and not tour_plan_data.empty:
+                mr_tp = tour_plan_data[tour_plan_data["MR"] == mr_id]
+                if not mr_tp.empty:
+                    planned = len(mr_tp)
+                    covered = mr_tp["Covered"].sum()
+                    pct = (covered / planned * 100) if planned > 0 else 0
+                    
+                    st.write(f"**Total Days Planned:** {planned}")
+                    st.write(f"**Days Actual Area == Planned Area:** {covered} ")
+                    st.write(f"**Compliance Rate:** {pct:.1f}%")
                 else:
-                    st.info("Tour Plan file not uploaded.")
+                    st.info("No Tour Plan data mapped for this MR.")
+            else:
+                st.info("Tour Plan file not uploaded.")
 
             # --- 3. Tour Plan Details ---
             st.markdown("---")
@@ -147,6 +135,39 @@ def render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency
                     st.caption("No Detailed Plan Available.")
             else:
                 st.caption("Provide Tour Plan file to render details.")
+            
+            # --- 3.5. Monthly Visit Tracking Comparison ---
+            st.markdown("---")
+            st.markdown("##### 📅 Total Tracked Visits (Month-over-Month)")
+            if not visits.empty:
+                mr_visits_all = visits[visits["MR_ID"] == mr_id]
+                if not mr_visits_all.empty:
+                    monthly_visits = mr_visits_all.groupby("Month").size().reset_index(name="Total Visits")
+                    # Set a categorical order so it's chronological if Month values are strings
+                    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                    monthly_visits["Month"] = pd.Categorical(monthly_visits["Month"], categories=month_order, ordered=True)
+                    monthly_visits = monthly_visits.sort_values("Month")
+                    
+                    fig_mv = px.bar(
+                        monthly_visits,
+                        x="Month",
+                        y="Total Visits",
+                        text="Total Visits",
+                        color="Month",
+                        color_discrete_map={"Feb": CLR_TEAL, "Mar": CLR_BLUE}
+                    )
+                    fig_mv.update_traces(textposition="outside")
+                    fig_mv.update_layout(
+                        template=TEMPLATE, height=300,
+                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                        margin=dict(t=20, b=40, l=40, r=40),
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig_mv, use_container_width=True)
+                else:
+                    st.info("No tracking data available for this MR.")
+            else:
+                st.info("No visit tracking files uploaded.")
             
             # --- 4. Doctor Repeat Visits ---
             st.markdown("---")
