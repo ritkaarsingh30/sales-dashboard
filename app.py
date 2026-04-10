@@ -35,6 +35,7 @@ from tabs.tab3_mr_performance import render_tab3
 from tabs.tab4_cm_spend      import render_tab4
 from tabs.tab5_visit_timeline import render_tab5
 from tabs.tab6_injectable    import render_tab6
+from tabs.tab_trends         import render_tab_trends
 
 
 def main():
@@ -121,7 +122,7 @@ def main():
             
         if not (f_sales and f_copy and f_proj and f_expense and f_monthly and f_visits and f_tour):
             st.warning(f"Please upload all Master files (Sidebar) and Monthly files above to view the {month} dashboard.")
-            return
+            return None  # Signal: data not ready
 
         # ── Load Data ──
         current_sheet_sales = f"{month[:3].upper()}-26"
@@ -184,15 +185,44 @@ def main():
         with tab6:
             render_tab6(month)
 
+        # Return loaded data bundle for cross-month trends
+        return {
+            "monthly": monthly_data,
+            "expense": expense_data,
+            "proj":    proj_data,
+            "visit":   visit_data,
+        }
+
     # Top-level Tabs
-    tab_jan, tab_feb, tab_mar = st.tabs(["January", "February", "March"])
-    
+    tab_jan, tab_feb, tab_mar, tab_trends = st.tabs(
+        ["January", "February", "March", "📈 Month Trends"]
+    )
+
+    all_months_data = {}
+    all_visits = []
+
     with tab_jan:
-        render_month_dashboard("January", prev_month=None)
+        data = render_month_dashboard("January", prev_month=None)
+        if data:
+            all_months_data["January"] = data
+            if data["visit"] is not None and not data["visit"].empty:
+                all_visits.append(data["visit"])
     with tab_feb:
-        render_month_dashboard("February", prev_month="January")
+        data = render_month_dashboard("February", prev_month="January")
+        if data:
+            all_months_data["February"] = data
+            if data["visit"] is not None and not data["visit"].empty:
+                all_visits.append(data["visit"])
     with tab_mar:
-        render_month_dashboard("March", prev_month="February")
+        data = render_month_dashboard("March", prev_month="February")
+        if data:
+            all_months_data["March"] = data
+            if data["visit"] is not None and not data["visit"].empty:
+                all_visits.append(data["visit"])
+
+    with tab_trends:
+        combined_visits = pd.concat(all_visits, ignore_index=True) if all_visits else pd.DataFrame()
+        render_tab_trends(all_months_data, combined_visits, currency)
 
 
 if __name__ == "__main__":
