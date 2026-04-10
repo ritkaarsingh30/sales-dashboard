@@ -64,56 +64,76 @@ def render_tab1(sales_data, proj_data, copy_data, currency, current_month: str):
 
     st.markdown("---")
 
-    # ── Prev → Current line chart ──
-    st.subheader(f"📈 Sales Trend (Units per Product)")
-    if not prev.empty and not current.empty:
-        prev_s = prev[["Product", "TOTAL_SALES"]].rename(columns={"TOTAL_SALES": "Prev"})
-        curr_s = current[["Product", "TOTAL_SALES"]].rename(columns={"TOTAL_SALES": "Current"})
-        trend = prev_s.merge(curr_s, on="Product", how="outer").fillna(0)
-        trend_long = trend.melt(id_vars="Product", var_name="Month", value_name="Units")
-        fig_trend = px.line(trend_long, x="Month", y="Units", color="Product",
-                            markers=True, template=TEMPLATE, height=400)
-        fig_trend.update_traces(line_width=2.5)
-        fig_trend.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                                margin=dict(t=20, b=20))
-        st.plotly_chart(fig_trend, width='stretch', key=f"fig_trend_{current_month}")
+    # ── Sales Trend ──
+    st.subheader("📈 Sales Trend (Units per Product)")
+    if not current.empty:
+        if not prev.empty:
+            # Two months available — show line trend
+            prev_s = prev[["Product", "TOTAL_SALES"]].rename(columns={"TOTAL_SALES": "Prev"})
+            curr_s = current[["Product", "TOTAL_SALES"]].rename(columns={"TOTAL_SALES": "Current"})
+            trend = prev_s.merge(curr_s, on="Product", how="outer").fillna(0)
+            trend_long = trend.melt(id_vars="Product", var_name="Month", value_name="Units")
+            fig_trend = px.line(trend_long, x="Month", y="Units", color="Product",
+                                markers=True, template=TEMPLATE, height=400)
+            fig_trend.update_traces(line_width=2.5)
+            fig_trend.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                                    margin=dict(t=20, b=20))
+            st.plotly_chart(fig_trend, width='stretch', key=f"fig_trend_{current_month}")
 
-        st.subheader("📊 Prev vs Current Sales Comparison (Units)")
-        fig_cmp = go.Figure()
-        fig_cmp.add_trace(go.Scatter(name="Prev", x=trend["Product"], y=trend["Prev"],
-                                     mode='lines+markers', line=dict(color=CLR_BLUE, width=2)))
-        fig_cmp.add_trace(go.Scatter(name="Current", x=trend["Product"], y=trend["Current"],
-                                     mode='lines+markers', line=dict(color=CLR_TEAL, width=2)))
-        fig_cmp.update_layout(template=TEMPLATE, height=360,
-                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                              margin=dict(t=20, b=60), xaxis_tickangle=-25,
-                              legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(fig_cmp, width='stretch', key=f"fig_cmp_{current_month}")
+            st.subheader("📊 Prev vs Current Sales Comparison (Units)")
+            fig_cmp = go.Figure()
+            fig_cmp.add_trace(go.Scatter(name="Prev", x=trend["Product"], y=trend["Prev"],
+                                         mode='lines+markers', line=dict(color=CLR_BLUE, width=2)))
+            fig_cmp.add_trace(go.Scatter(name="Current", x=trend["Product"], y=trend["Current"],
+                                         mode='lines+markers', line=dict(color=CLR_TEAL, width=2)))
+            fig_cmp.update_layout(template=TEMPLATE, height=360,
+                                  plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                                  margin=dict(t=20, b=60), xaxis_tickangle=-25,
+                                  legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig_cmp, width='stretch', key=f"fig_cmp_{current_month}")
+        else:
+            # First month — no previous data, show current as bar chart
+            st.caption(f"ℹ️ No previous month data available — showing {current_month} units only.")
+            curr_s = current[["Product", "TOTAL_SALES"]].sort_values("TOTAL_SALES", ascending=False)
+            fig_trend = go.Figure(go.Bar(
+                x=curr_s["Product"], y=curr_s["TOTAL_SALES"],
+                marker_color=CLR_BLUE,
+                text=curr_s["TOTAL_SALES"].astype(int), textposition="outside",
+            ))
+            fig_trend.update_layout(template=TEMPLATE, height=400,
+                                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                                    margin=dict(t=20, b=60), xaxis_tickangle=-25,
+                                    yaxis_title="Units Sold")
+            st.plotly_chart(fig_trend, width='stretch', key=f"fig_trend_{current_month}")
 
     st.markdown("---")
 
     # ── Distributor 2×2 ──
     st.subheader("🏭 Sales by Distributor (Units) with MoM Growth")
-    if not current.empty and not prev.empty:
+    if not current.empty:
         fig_dist = make_subplots(rows=2, cols=2, subplot_titles=DISTRIBUTORS,
                                  vertical_spacing=0.25, horizontal_spacing=0.10)
         for (r, c), dist in zip([(1,1),(1,2),(2,1),(2,2)], DISTRIBUTORS):
             col_key = f"{dist}_SALES"
-            if col_key not in current.columns or col_key not in prev.columns:
+            if col_key not in current.columns:
                 continue
-            d_prev = prev[["Product", col_key]].rename(columns={col_key: "Prev_Sales"})
             d_curr = current[["Product", col_key]].rename(columns={col_key: "Curr_Sales"})
-            sub = pd.merge(d_curr, d_prev, on="Product", how="left").fillna(0)
-            sub = sub[(sub["Curr_Sales"] > 0) | (sub["Prev_Sales"] > 0)].copy()
-            sub = sub.sort_values("Curr_Sales", ascending=True)
-            sub["MoM_Text"] = sub.apply(
-                lambda row: f"+{((row['Curr_Sales']-row['Prev_Sales'])/row['Prev_Sales']*100):.0f}%"
-                if row['Prev_Sales'] > 0 and row['Curr_Sales'] > row['Prev_Sales']
-                else (f"{((row['Curr_Sales']-row['Prev_Sales'])/row['Prev_Sales']*100):.0f}%"
-                      if row['Prev_Sales'] > 0 else "New"),
-                axis=1
-            )
-            sub["Display_Text"] = sub["Curr_Sales"].astype(int).astype(str) + " (" + sub["MoM_Text"] + ")"
+            if not prev.empty and col_key in prev.columns:
+                d_prev = prev[["Product", col_key]].rename(columns={col_key: "Prev_Sales"})
+                sub = pd.merge(d_curr, d_prev, on="Product", how="left").fillna(0)
+                sub["MoM_Text"] = sub.apply(
+                    lambda row: f"+{((row['Curr_Sales']-row['Prev_Sales'])/row['Prev_Sales']*100):.0f}%"
+                    if row['Prev_Sales'] > 0 and row['Curr_Sales'] > row['Prev_Sales']
+                    else (f"{((row['Curr_Sales']-row['Prev_Sales'])/row['Prev_Sales']*100):.0f}%"
+                          if row['Prev_Sales'] > 0 else "New"),
+                    axis=1
+                )
+                sub["Display_Text"] = sub["Curr_Sales"].astype(int).astype(str) + " (" + sub["MoM_Text"] + ")"
+            else:
+                sub = d_curr.copy().fillna(0)
+                sub["Prev_Sales"] = 0
+                sub["Display_Text"] = sub["Curr_Sales"].astype(int).astype(str)
+            sub = sub[sub["Curr_Sales"] > 0].sort_values("Curr_Sales", ascending=True)
             fig_dist.add_trace(go.Bar(
                 name=dist, x=sub["Curr_Sales"], y=sub["Product"], orientation="h",
                 marker_color=DIST_COLORS[dist],
@@ -124,3 +144,5 @@ def render_tab1(sales_data, proj_data, copy_data, currency, current_month: str):
                                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                margin=dict(t=50, b=20))
         st.plotly_chart(fig_dist, width='stretch', key=f"fig_dist_{current_month}")
+
+
