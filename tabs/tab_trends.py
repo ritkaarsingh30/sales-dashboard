@@ -147,36 +147,62 @@ def render_tab_trends(all_months: dict, visit_data_all: pd.DataFrame, currency: 
             )
             st.plotly_chart(fig_conv, width="stretch", key="trend_drs_conv")
 
-        # ── Chart: Days Worked vs Target ────────────────────────────────────
-        st.subheader("⏰ Days Worked vs Target (per MR per Month)")
-        fig_days = go.Figure()
+        # ── Chart: Days Worked vs Target — Heatmap ─────────────────────────
+        st.subheader("⏰ Days Worked as % of Target")
+        st.caption("Green = on/over target · Yellow = within 10% below · Red = more than 10% below target")
+
+        # Build pivot: rows = MR, cols = Month, values = % achievement
+        hm_rows = []
         for month in MONTHS:
             sub = delegates_all[delegates_all["Month"] == month]
-            fig_days.add_trace(go.Bar(
-                name=f"{month} — Worked",
-                x=sub["DisplayName"],
-                y=sub["DaysWorked"].fillna(0).astype(int),
-                marker_color=MONTH_COLORS[month],
-                opacity=0.9,
-                legendgroup=month,
-            ))
-            fig_days.add_trace(go.Scatter(
-                name=f"{month} — Target",
-                x=sub["DisplayName"],
-                y=sub["DaysTarget"].fillna(0).astype(int),
-                mode="markers",
-                marker=dict(color=MONTH_COLORS[month], size=10, symbol="line-ew-open", line=dict(width=3)),
-                legendgroup=month,
-            ))
-        fig_days.update_layout(
-            barmode="group", template=TEMPLATE, height=380,
+            for _, r in sub.iterrows():
+                target = r["DaysTarget"] if not pd.isna(r["DaysTarget"]) else 20
+                worked = r["DaysWorked"] if not pd.isna(r["DaysWorked"]) else 0
+                pct = round((worked / target * 100), 1) if target > 0 else 0
+                hm_rows.append({
+                    "MR":    r["DisplayName"],
+                    "Month": month,
+                    "Pct":   pct,
+                    "Label": f"{pct}%\n({int(worked)}/{int(target)} days)",
+                })
+
+        hm_df = pd.DataFrame(hm_rows)
+        pivot_pct   = hm_df.pivot(index="MR", columns="Month", values="Pct").reindex(columns=MONTHS)
+        pivot_label = hm_df.pivot(index="MR", columns="Month", values="Label").reindex(columns=MONTHS)
+
+        fig_hm = go.Figure(go.Heatmap(
+            z=pivot_pct.values,
+            x=MONTHS,
+            y=pivot_pct.index.tolist(),
+            text=pivot_label.values,
+            texttemplate="%{text}",
+            textfont=dict(size=13, color="white"),
+            colorscale=[
+                [0.0,  "#b91c1c"],   # deep red  → 0%
+                [0.7,  "#ca8a04"],   # amber     → 70%
+                [0.85, "#16a34a"],   # green     → 85%
+                [1.0,  "#4ade80"],   # bright green → 100%+
+            ],
+            zmin=60, zmax=105,
+            showscale=True,
+            colorbar=dict(
+                title="% of Target",
+                ticksuffix="%",
+                thickness=14,
+                len=0.8,
+            ),
+            hoverongaps=False,
+            hovertemplate="<b>%{y}</b><br>%{x}<br>Achievement: %{z}%<extra></extra>",
+        ))
+        fig_hm.update_layout(
+            template=TEMPLATE, height=280,
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            margin=dict(t=20, b=60, l=20, r=20),
-            legend=dict(orientation="h", y=1.08, traceorder="grouped"),
-            xaxis_tickangle=-15,
-            yaxis_title="Days",
+            margin=dict(t=10, b=20, l=160, r=80),
+            xaxis=dict(side="top", tickfont=dict(size=13, color="#e8f0ff")),
+            yaxis=dict(tickfont=dict(size=12, color="#c0d0ee"), autorange="reversed"),
         )
-        st.plotly_chart(fig_days, width="stretch", key="trend_days")
+        st.plotly_chart(fig_hm, width="stretch", key="trend_days")
+
 
     else:
         st.info("No delegate report data available across months.")
