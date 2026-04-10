@@ -5,9 +5,9 @@ Tab 6 — Injectable Commission (placeholder)
 import streamlit as st
 
 
-def render_tab6():
+def render_tab6(current_month: str):
     st.markdown(
-        """
+        f"""
         <div style="display:flex;align-items:center;justify-content:center;
                     min-height:480px;">
             <div style="background:linear-gradient(135deg,#12192a,#1a2640);
@@ -28,7 +28,7 @@ def render_tab6():
                     This tab will display injectable product commission ROI analysis —
                     including 12-month commission trends per clinic, product-level
                     profitability, and MR attribution breakdowns.<br><br>
-                    Upload <strong style="color:#cce0ff;">INJECTABLE_COMISSION_TILL_feb_2026_IVC.xlsx</strong>
+                    Upload <strong style="color:#cce0ff;">INJECTABLE_COMISSION_TILL_{current_month[:3].lower()}_2026_IVC.xlsx</strong>
                     when ready to activate.
                 </p>
             </div>

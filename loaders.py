@@ -20,20 +20,46 @@ from name_map import (
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SAFE SHEET HELPER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def safe_sheet(xl, sheet_name: str, header=None):
+    """
+    Tries to read `sheet_name` from an ExcelFile.
+    Returns (DataFrame, None) on success.
+    Returns (None, sheet_name) if the sheet doesn't exist.
+    """
+    if sheet_name not in xl.sheet_names:
+        return None, sheet_name
+    return pd.read_excel(xl, sheet_name=sheet_name, header=header), None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SALES
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def load_sales(file_bytes: bytes) -> dict:
+def load_sales(file_bytes: bytes, current_sheet: str, prev_sheet: str = None) -> dict:
     """
-    Returns dict with keys 'jan' and 'feb', each a DataFrame:
+    Returns dict with keys 'current' and 'prev', each a DataFrame:
     columns: Product, Category, RATE,
              UBIPHARM/LABOREX_SALES, COPHARMED/LABOREX_SALES, TEDIS_SALES, DPCI_SALES,
              UBIPHARM/LABOREX_CLOSING, ...  TOTAL_SALES, TOTAL_VALUE_EUR
     """
     results = {}
-    for sheet, month in [("JAN-26", "jan"), ("FEB-26", "feb")]:
-        raw = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet, header=None)
+    xl = pd.ExcelFile(BytesIO(file_bytes))
+    target_sheets = [("current", current_sheet)]
+    if prev_sheet:
+        target_sheets.append(("prev", prev_sheet))
+    else:
+        results["prev"] = pd.DataFrame()
+        
+    for key, sheet in target_sheets:
+        if sheet not in xl.sheet_names:
+            results[key] = pd.DataFrame()
+            continue
+            
+        raw = pd.read_excel(xl, sheet_name=sheet, header=None)
         rows = []
         current_category = "TABLET"
         for i, row in raw.iterrows():
@@ -67,7 +93,7 @@ def load_sales(file_bytes: bytes) -> dict:
             rec["TOTAL_SALES"] = sum(rec[f"{d}_SALES"] for d in DISTRIBUTORS)
             rec["TOTAL_VALUE_EUR"] = safe_num(row.iloc[-1])
             rows.append(rec)
-        results[month] = pd.DataFrame(rows)
+        results[key] = pd.DataFrame(rows)
     return results
 
 
@@ -83,48 +109,61 @@ def load_projection(file_bytes: bytes) -> dict:
       'activity_plan': DataFrame — SN, Doctor, Hospital, Speciality, Delegate, Area, Activity, Amount_FCFA, Focus_Products
     """
     xl = pd.ExcelFile(BytesIO(file_bytes))
+    missing_sheets = []
 
-    raw_p = pd.read_excel(xl, sheet_name="PROJECTION", header=None)
-    proj_rows = []
-    for i, row in raw_p.iterrows():
-        if i < 3:
-            continue
-        sn = row.iloc[0]
-        if not isinstance(sn, (int, float)) or pd.isna(sn):
-            continue
-        product = str(row.iloc[1]).strip()
-        if not product or product.upper() in ("NAN",):
-            continue
-        proj_rows.append({
-            "Product": product,
-            "RATE": safe_num(row.iloc[2]),
-            "Target_Units": safe_num(row.iloc[3]),
-            "Target_Value_EUR": safe_num(row.iloc[4]),
-        })
-    proj_df = pd.DataFrame(proj_rows)
+    # ── PROJECTION ──
+    raw_p, miss = safe_sheet(xl, "PROJECTION")
+    if miss:
+        missing_sheets.append(miss)
 
-    sheet_name = [s for s in xl.sheet_names if "ACTIVITY" in s.upper()][0]
-    raw_a = pd.read_excel(xl, sheet_name=sheet_name, header=None)
-    act_rows = []
-    for i, row in raw_a.iterrows():
-        if i < 2:
-            continue
-        sn = row.iloc[0]
-        if not isinstance(sn, (int, float)) or pd.isna(sn):
-            continue
-        act_rows.append({
-            "SN": int(sn),
-            "Doctor": normalize_doctor(str(row.iloc[1]).strip()),
-            "Hospital": str(row.iloc[2]).strip(),
-            "Speciality": str(row.iloc[3]).strip(),
-            "Delegate": normalize_mr(str(row.iloc[4]).strip()),
-            "Area": normalize_territory(str(row.iloc[5]).strip()),
-            "Activity": normalize_activity(str(row.iloc[6]).strip()),
-            "Amount_FCFA": safe_num(row.iloc[7]),
-            "Focus_Products": parse_multi_products(str(row.iloc[8]).strip()),
-        })
-    act_df = pd.DataFrame(act_rows)
-    return {"projection": proj_df, "activity_plan": act_df}
+    proj_df = None
+    if raw_p is not None:
+        proj_rows = []
+        for i, row in raw_p.iterrows():
+            if i < 3:
+                continue
+            sn = row.iloc[0]
+            if not isinstance(sn, (int, float)) or pd.isna(sn):
+                continue
+            product = str(row.iloc[1]).strip()
+            if not product or product.upper() in ("NAN",):
+                continue
+            proj_rows.append({
+                "Product": product,
+                "RATE": safe_num(row.iloc[2]),
+                "Target_Units": safe_num(row.iloc[3]),
+                "Target_Value_EUR": safe_num(row.iloc[4]),
+            })
+        proj_df = pd.DataFrame(proj_rows)
+
+    # ── ACTIVITY PLAN ──
+    act_df = None
+    activity_sheet_names = [s for s in xl.sheet_names if "ACTIVITY" in s.upper()]
+    if not activity_sheet_names:
+        missing_sheets.append("ACTIVITY PLAN")
+    else:
+        raw_a = pd.read_excel(xl, sheet_name=activity_sheet_names[0], header=None)
+        act_rows = []
+        for i, row in raw_a.iterrows():
+            if i < 2:
+                continue
+            sn = row.iloc[0]
+            if not isinstance(sn, (int, float)) or pd.isna(sn):
+                continue
+            act_rows.append({
+                "SN": int(sn),
+                "Doctor": normalize_doctor(str(row.iloc[1]).strip()),
+                "Hospital": str(row.iloc[2]).strip(),
+                "Speciality": str(row.iloc[3]).strip(),
+                "Delegate": normalize_mr(str(row.iloc[4]).strip()),
+                "Area": normalize_territory(str(row.iloc[5]).strip()),
+                "Activity": normalize_activity(str(row.iloc[6]).strip()),
+                "Amount_FCFA": safe_num(row.iloc[7]),
+                "Focus_Products": parse_multi_products(str(row.iloc[8]).strip()),
+            })
+        act_df = pd.DataFrame(act_rows)
+
+    return {"projection": proj_df, "activity_plan": act_df, "missing_sheets": missing_sheets}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -141,114 +180,128 @@ def load_expense(file_bytes: bytes) -> dict:
       'total_received_fcfa', 'total_spent_fcfa', 'balance_fcfa'
     """
     xl = pd.ExcelFile(BytesIO(file_bytes))
+    missing_sheets = []
 
     # ── MONEY RECEIVED ──
-    raw_mr = pd.read_excel(xl, sheet_name="MONEY RECEIVED", header=None)
-    mr_rows = []
-    for i, row in raw_mr.iterrows():
-        if i < 2:
-            continue
-        date_val = row.iloc[0]
-        if pd.isna(date_val) or str(date_val).strip() in ("", "NaN", "Date"):
-            continue
-        if "TOTAL" in str(date_val).upper():
-            continue
-        try:
-            date_val = pd.to_datetime(date_val)
-        except Exception:
-            continue
-        mr_rows.append({
-            "Date": date_val,
-            "Source": str(row.iloc[1]).strip(),
-            "Amount_FCFA": safe_num(row.iloc[2]),
-            "Amount_EUR": safe_num(row.iloc[3]),
-            "Description": str(row.iloc[4]).strip(),
-        })
-    mr_df = pd.DataFrame(mr_rows)
+    raw_mr, miss = safe_sheet(xl, "MONEY RECEIVED")
+    if miss:
+        missing_sheets.append(miss)
 
+    mr_df = None
     total_received_fcfa = 0
     total_spent_fcfa = 0
     balance_fcfa = 0
     opening_balance_fcfa = 0
     new_budget_fcfa = 0
-    for i, row in raw_mr.iterrows():
-        label = str(row.iloc[0]).upper()
-        col1_label = str(row.iloc[1]).upper() if len(row) > 1 else ""
-        col5  = str(row.iloc[5]).upper() if len(row) > 5 else ""
 
-        if "OPENING BALANCE" in col1_label:
-            opening_balance_fcfa = safe_num(row.iloc[2]) if len(row) > 2 else 0
-        elif "RECEIVED ACTIVITY MONEY" in col1_label or "RECEIVED" in col1_label:
-            new_budget_fcfa = safe_num(row.iloc[2]) if len(row) > 2 else 0
+    if raw_mr is not None:
+        mr_rows = []
+        for i, row in raw_mr.iterrows():
+            if i < 2:
+                continue
+            date_val = row.iloc[0]
+            if pd.isna(date_val) or str(date_val).strip() in ("", "NaN", "Date"):
+                continue
+            if "TOTAL" in str(date_val).upper():
+                continue
+            try:
+                date_val = pd.to_datetime(date_val)
+            except Exception:
+                continue
+            mr_rows.append({
+                "Date": date_val,
+                "Source": str(row.iloc[1]).strip(),
+                "Amount_FCFA": safe_num(row.iloc[2]),
+                "Amount_EUR": safe_num(row.iloc[3]),
+                "Description": str(row.iloc[4]).strip(),
+            })
+        mr_df = pd.DataFrame(mr_rows)
 
-        if "TOTAL" in label and ("RECEIV" in label or "FCFA" in label):
-            v = safe_num(row.iloc[2]) if len(row) > 2 else 0
-            if v > 0:
-                total_received_fcfa = v
-        if "TOTAL SPENT" in col5:
-            total_spent_fcfa = safe_num(row.iloc[6]) if len(row) > 6 else 0
-        if "BALANCE" in col5:
-            balance_fcfa = safe_num(row.iloc[6]) if len(row) > 6 else 0
-            
-    if total_received_fcfa == 0 and not mr_df.empty:
-        total_received_fcfa = mr_df["Amount_FCFA"].sum()
+        for i, row in raw_mr.iterrows():
+            label = str(row.iloc[0]).upper()
+            col1_label = str(row.iloc[1]).upper() if len(row) > 1 else ""
+            col5  = str(row.iloc[5]).upper() if len(row) > 5 else ""
+            if "OPENING BALANCE" in col1_label:
+                opening_balance_fcfa = safe_num(row.iloc[2]) if len(row) > 2 else 0
+            elif "RECEIVED ACTIVITY MONEY" in col1_label or "RECEIVED" in col1_label:
+                new_budget_fcfa = safe_num(row.iloc[2]) if len(row) > 2 else 0
+            if "TOTAL" in label and ("RECEIV" in label or "FCFA" in label):
+                v = safe_num(row.iloc[2]) if len(row) > 2 else 0
+                if v > 0:
+                    total_received_fcfa = v
+            if "TOTAL SPENT" in col5:
+                total_spent_fcfa = safe_num(row.iloc[6]) if len(row) > 6 else 0
+            if "BALANCE" in col5:
+                balance_fcfa = safe_num(row.iloc[6]) if len(row) > 6 else 0
+        if total_received_fcfa == 0 and not mr_df.empty:
+            total_received_fcfa = mr_df["Amount_FCFA"].sum()
 
     # ── ACTIVITY EXP ──
-    raw_ae = pd.read_excel(xl, sheet_name="ACTIVITY EXP.", header=None)
-    ae_rows = []
-    for i, row in raw_ae.iterrows():
-        if i < 2:
-            continue
-        sn = row.iloc[0]
-        if not isinstance(sn, (int, float)) or pd.isna(sn):
-            continue
-        raw_resp = str(row.iloc[8]).strip()
-        if "/" in raw_resp:
-            mr_ids = ",".join(normalize_mr(p.strip()) for p in raw_resp.split("/"))
-        else:
-            mr_ids = normalize_mr(raw_resp)
-        num_mrs = len([i.strip() for i in mr_ids.split(",") if i.strip()])
-        num_mrs = max(1, num_mrs)
-        ae_rows.append({
-            "SN": int(sn),
-            "Doctor": normalize_doctor(str(row.iloc[1]).strip()),
-            "Hospital": str(row.iloc[2]).strip(),
-            "Speciality": str(row.iloc[3]).strip(),
-            "Activity": str(row.iloc[4]).strip(),
-            "Activity_ID": normalize_activity(str(row.iloc[4]).strip()),
-            "Products": parse_multi_products(str(row.iloc[5]).strip()),
-            "Amount_FCFA": safe_num(row.iloc[6]),
-            "Amount_FCFA_Share": safe_num(row.iloc[6]) / num_mrs,
-            "Contact": str(row.iloc[7]).strip(),
-            "Responsible": raw_resp,
-            "MR_IDs": mr_ids,
-            "Num_MRs": num_mrs,
-        })
-    ae_df = pd.DataFrame(ae_rows)
-    ae_df["Activity"] = ae_df["Activity_ID"].apply(activity_display_name)
+    raw_ae, miss = safe_sheet(xl, "ACTIVITY EXP.")
+    if miss:
+        missing_sheets.append(miss)
+
+    ae_df = None
+    if raw_ae is not None:
+        ae_rows = []
+        for i, row in raw_ae.iterrows():
+            if i < 2:
+                continue
+            sn = row.iloc[0]
+            if not isinstance(sn, (int, float)) or pd.isna(sn):
+                continue
+            raw_resp = str(row.iloc[8]).strip()
+            if "/" in raw_resp:
+                mr_ids = ",".join(normalize_mr(p.strip()) for p in raw_resp.split("/"))
+            else:
+                mr_ids = normalize_mr(raw_resp)
+            num_mrs = len([i.strip() for i in mr_ids.split(",") if i.strip()])
+            num_mrs = max(1, num_mrs)
+            ae_rows.append({
+                "SN": int(sn),
+                "Doctor": normalize_doctor(str(row.iloc[1]).strip()),
+                "Hospital": str(row.iloc[2]).strip(),
+                "Speciality": str(row.iloc[3]).strip(),
+                "Activity": str(row.iloc[4]).strip(),
+                "Activity_ID": normalize_activity(str(row.iloc[4]).strip()),
+                "Products": parse_multi_products(str(row.iloc[5]).strip()),
+                "Amount_FCFA": safe_num(row.iloc[6]),
+                "Amount_FCFA_Share": safe_num(row.iloc[6]) / num_mrs,
+                "Contact": str(row.iloc[7]).strip(),
+                "Responsible": raw_resp,
+                "MR_IDs": mr_ids,
+                "Num_MRs": num_mrs,
+            })
+        ae_df = pd.DataFrame(ae_rows)
+        ae_df["Activity"] = ae_df["Activity_ID"].apply(activity_display_name)
 
     # ── OTHER EXP ──
-    raw_oe = pd.read_excel(xl, sheet_name="OTHER EXP.", header=None)
-    oe_rows = []
-    for i, row in raw_oe.iterrows():
-        if i < 2:
-            continue
-        sn = row.iloc[0]
-        if not isinstance(sn, (int, float)) or pd.isna(sn):
-            continue
-        amount_fcfa = safe_num(row.iloc[3])
-        if amount_fcfa == 0:
-            continue
-        oe_rows.append({
-            "SN": int(sn),
-            "Country": str(row.iloc[1]).strip(),
-            "Details": str(row.iloc[2]).strip(),
-            "Amount_FCFA": amount_fcfa,
-            "Amount_EUR": safe_num(row.iloc[4]),
-            "Comments": str(row.iloc[5]).strip(),
-            "Category": str(row.iloc[6]).strip(),
-        })
-    oe_df = pd.DataFrame(oe_rows)
+    raw_oe, miss = safe_sheet(xl, "OTHER EXP.")
+    if miss:
+        missing_sheets.append(miss)
+
+    oe_df = None
+    if raw_oe is not None:
+        oe_rows = []
+        for i, row in raw_oe.iterrows():
+            if i < 2:
+                continue
+            sn = row.iloc[0]
+            if not isinstance(sn, (int, float)) or pd.isna(sn):
+                continue
+            amount_fcfa = safe_num(row.iloc[3])
+            if amount_fcfa == 0:
+                continue
+            oe_rows.append({
+                "SN": int(sn),
+                "Country": str(row.iloc[1]).strip(),
+                "Details": str(row.iloc[2]).strip(),
+                "Amount_FCFA": amount_fcfa,
+                "Amount_EUR": safe_num(row.iloc[4]),
+                "Comments": str(row.iloc[5]).strip(),
+                "Category": str(row.iloc[6]).strip(),
+            })
+        oe_df = pd.DataFrame(oe_rows)
 
     return {
         "activity_exp": ae_df,
@@ -259,6 +312,7 @@ def load_expense(file_bytes: bytes) -> dict:
         "total_received_fcfa": total_received_fcfa,
         "total_spent_fcfa": total_spent_fcfa,
         "balance_fcfa": balance_fcfa,
+        "missing_sheets": missing_sheets,
     }
 
 
@@ -274,53 +328,66 @@ def load_monthly_reports(file_bytes: bytes) -> dict:
       'budget_analysis': DataFrame
     """
     xl = pd.ExcelFile(BytesIO(file_bytes))
+    missing_sheets = []
 
-    raw_d = pd.read_excel(xl, sheet_name="Delegates Reports", header=None)
-    del_rows = []
-    for i, row in raw_d.iterrows():
-        if i < 3:
-            continue
-        sn = row.iloc[0]
-        if not isinstance(sn, (int, float)) or pd.isna(sn):
-            continue
-        delegate = str(row.iloc[1]).strip()
-        if any(k in delegate.upper() for k in ("TOTAL", "TARGET")):
-            continue
-        del_rows.append({
-            "SN": int(sn),
-            "Delegate": delegate,
-            "Territory": str(row.iloc[2]).strip(),
-            "NonPrescriber": safe_num(row.iloc[3]),
-            "Prescriber": safe_num(row.iloc[4]),
-            "DrsConverted": safe_num(row.iloc[5]),
-            "TotalCalls": safe_num(row.iloc[6]),
-            "PharmacyCalls": safe_num(row.iloc[7]),
-            "DaysTarget": safe_num(row.iloc[8]),
-            "DaysWorked": safe_num(row.iloc[9]),
-            "AvgCallsPerDay": safe_num(row.iloc[10]),
-            "TotalOrders": safe_num(row.iloc[11]),
-            "CTC": safe_num(row.iloc[12]),
-        })
-    del_df = pd.DataFrame(del_rows)
+    # ── DELEGATES REPORTS ──
+    raw_d, miss = safe_sheet(xl, "Delegates Reports")
+    if miss:
+        missing_sheets.append(miss)
 
-    raw_b = pd.read_excel(xl, sheet_name="Budget Analysis", header=None)
-    ba_rows = []
-    for i, row in raw_b.iterrows():
-        if i < 2:
-            continue
-        doctor = str(row.iloc[0]).strip()
-        if not doctor or doctor.upper() in ("NAN", "DR. NAME"):
-            continue
-        ba_rows.append({
-            "Doctor": normalize_doctor(doctor),
-            "Area": normalize_territory(str(row.iloc[1]).strip()),
-            "MR": normalize_mr(str(row.iloc[2]).strip()),
-            "ActivityType": normalize_activity(str(row.iloc[3]).strip()),
-            "Value_FCFA": safe_num(row.iloc[4]),
-        })
-    ba_df = pd.DataFrame(ba_rows)
+    del_df = None
+    if raw_d is not None:
+        del_rows = []
+        for i, row in raw_d.iterrows():
+            if i < 3:
+                continue
+            sn = row.iloc[0]
+            if not isinstance(sn, (int, float)) or pd.isna(sn):
+                continue
+            delegate = str(row.iloc[1]).strip()
+            if any(k in delegate.upper() for k in ("TOTAL", "TARGET")):
+                continue
+            del_rows.append({
+                "SN": int(sn),
+                "Delegate": delegate,
+                "Territory": str(row.iloc[2]).strip(),
+                "NonPrescriber": safe_num(row.iloc[3]),
+                "Prescriber": safe_num(row.iloc[4]),
+                "DrsConverted": safe_num(row.iloc[5]),
+                "TotalCalls": safe_num(row.iloc[6]),
+                "PharmacyCalls": safe_num(row.iloc[7]),
+                "DaysTarget": safe_num(row.iloc[8]),
+                "DaysWorked": safe_num(row.iloc[9]),
+                "AvgCallsPerDay": safe_num(row.iloc[10]),
+                "TotalOrders": safe_num(row.iloc[11]),
+                "CTC": safe_num(row.iloc[12]),
+            })
+        del_df = pd.DataFrame(del_rows)
 
-    return {"delegates": del_df, "budget_analysis": ba_df}
+    # ── BUDGET ANALYSIS ──
+    raw_b, miss = safe_sheet(xl, "Budget Analysis")
+    if miss:
+        missing_sheets.append(miss)
+
+    ba_df = None
+    if raw_b is not None:
+        ba_rows = []
+        for i, row in raw_b.iterrows():
+            if i < 2:
+                continue
+            doctor = str(row.iloc[0]).strip()
+            if not doctor or doctor.upper() in ("NAN", "DR. NAME"):
+                continue
+            ba_rows.append({
+                "Doctor": normalize_doctor(doctor),
+                "Area": normalize_territory(str(row.iloc[1]).strip()),
+                "MR": normalize_mr(str(row.iloc[2]).strip()),
+                "ActivityType": normalize_activity(str(row.iloc[3]).strip()),
+                "Value_FCFA": safe_num(row.iloc[4]),
+            })
+        ba_df = pd.DataFrame(ba_rows)
+
+    return {"delegates": del_df, "budget_analysis": ba_df, "missing_sheets": missing_sheets}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -338,6 +405,8 @@ def load_visit_tracker(files_and_months: list) -> pd.DataFrame:
         xl = pd.ExcelFile(BytesIO(file_bytes))
         for sheet in xl.sheet_names:
             raw = pd.read_excel(xl, sheet_name=sheet, header=None)
+            if len(raw) < 4:
+                continue  # Sheet too short to contain a valid header row
             try:
                 mr_name = str(raw.iloc[0, 2]).strip()
             except Exception:
@@ -347,22 +416,32 @@ def load_visit_tracker(files_and_months: list) -> pd.DataFrame:
             mr_id = normalize_mr(mr_name)
 
             header_row = raw.iloc[3]
-            visit_cols = [c for c in raw.columns if "visit" in str(header_row[c]).lower()]
-            doc_col    = next((c for c in raw.columns if "NOM"    in str(header_row[c]).upper()), None)
+            # Detect visit date columns — parse first, then keep only those with real dates
+            candidate_visit_cols = [c for c in raw.columns if "visit" in str(header_row[c]).lower()]
+            for vc in candidate_visit_cols:
+                raw[vc] = pd.to_datetime(raw[vc], errors="coerce")
+            # Only keep columns that actually contain at least one real date (avoids 'New Dr Visit' boolean cols)
+            visit_cols = [c for c in candidate_visit_cols if raw[c].notna().any()]
+
+            # Detect doctor column — NOM, DR NAME, DR. NAME, NAME OF DOCTOR all valid
+            doc_col = next(
+                (c for c in raw.columns if any(
+                    kw in str(header_row[c]).upper()
+                    for kw in ("NOM", "DR NAME", "DR. NAME", "DOCTOR NAME", "NAME OF")
+                )),
+                None
+            )
             spec_col   = next((c for c in raw.columns if "SPEC"   in str(header_row[c]).upper()), None)
             clinic_col = next((c for c in raw.columns
                                if "CLINIC"   in str(header_row[c]).upper()
                                or "HOSPITAL" in str(header_row[c]).upper()
                                or "CSPS"     in str(header_row[c]).upper()), None)
 
-            for vc in visit_cols:
-                raw[vc] = pd.to_datetime(raw[vc], errors="coerce")
-
             for i, row in raw.iterrows():
                 if i <= 3:
                     continue
                 doctor = str(row[doc_col]).strip() if doc_col is not None else ""
-                if not doctor or doctor.upper() in ("NAN", "NOM /PERNOM", ""):
+                if not doctor or doctor.upper() in ("NAN", "NOM /PERNOM", "DR NAME", "NAME", ""):
                     continue
                 speciality = str(row[spec_col]).strip() if spec_col is not None else ""
                 clinic     = str(row[clinic_col]).strip() if clinic_col is not None else ""
@@ -391,14 +470,23 @@ def load_visit_tracker(files_and_months: list) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def load_copy_report(file_bytes: bytes) -> dict:
+def load_copy_report(file_bytes: bytes, current_month: str) -> dict:
     """
     Returns dict:
       'product_perf': DataFrame
       'plan_activities': DataFrame
       'actual_activities': DataFrame
     """
-    raw = pd.read_excel(BytesIO(file_bytes), sheet_name=0, header=None)
+    xl = pd.ExcelFile(BytesIO(file_bytes))
+    sheet_name = f"{current_month[:3].lower()} 2026"
+    if sheet_name not in [s.lower() for s in xl.sheet_names]:
+        # Fallback to the first sheet if the exact named one isn't found
+        sheet_name = 0
+    else:
+        # Get exact case mapping
+        sheet_name = next(s for s in xl.sheet_names if s.lower() == sheet_name)
+        
+    raw = pd.read_excel(xl, sheet_name=sheet_name, header=None)
     prod_rows, plan_rows, actual_rows = [], [], []
 
     for i, row in raw.iterrows():
@@ -425,23 +513,24 @@ def load_copy_report(file_bytes: bytes) -> dict:
                 "Amount_FCFA": safe_num(row.iloc[9]),
             })
 
-        doc_actual = str(row.iloc[10]).strip()
+        doc_actual = str(row.iloc[10]).strip() if len(row) > 10 else ""
         if doc_actual and doc_actual.upper() not in ("NAN", "DOCTOR NAME", ""):
             actual_rows.append({
-                "Doctor": normalize_doctor(doc_actual),
-                "Hospital": str(row.iloc[11]).strip(),
-                "Speciality": str(row.iloc[12]).strip(),
-                "Activity": normalize_activity(str(row.iloc[13]).strip()),
-                "Amount_FCFA": safe_num(row.iloc[14]),
-                "Remarks": str(row.iloc[15]).strip(),
-                "VisitedBy": normalize_mr(str(row.iloc[16]).strip()),
-                "NoOfVisits": safe_num(row.iloc[17]),
+                "Doctor":     normalize_doctor(doc_actual),
+                "Hospital":   str(row.iloc[11]).strip()  if len(row) > 11 else "",
+                "Speciality": str(row.iloc[12]).strip()  if len(row) > 12 else "",
+                "Activity":   normalize_activity(str(row.iloc[13]).strip()) if len(row) > 13 else "",
+                "Amount_FCFA": safe_num(row.iloc[14])    if len(row) > 14 else 0,
+                "Remarks":    str(row.iloc[15]).strip()  if len(row) > 15 else "",
+                "VisitedBy":  normalize_mr(str(row.iloc[16]).strip()) if len(row) > 16 else "",
+                "NoOfVisits": safe_num(row.iloc[17])     if len(row) > 17 else 0,
             })
 
     return {
         "product_perf": pd.DataFrame(prod_rows),
         "plan_activities": pd.DataFrame(plan_rows),
         "actual_activities": pd.DataFrame(actual_rows),
+        "missing_sheets": [],
     }
 
 

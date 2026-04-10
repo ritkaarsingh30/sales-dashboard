@@ -1,0 +1,83 @@
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://172.29.81.110:8501
+
+gio: http://localhost:8501: Operation not supported
+2026-04-08 13:20:19.647 Uncaught app execution
+Traceback (most recent call last):
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+             ^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/app.py", line 184, in <module>
+    main()
+  File "/home/pc/sales-dashboard/app.py", line 176, in main
+    render_month_dashboard("January", prev_month=None)
+  File "/home/pc/sales-dashboard/app.py", line 131, in render_month_dashboard
+    proj_data      = load_projection(f_proj.getvalue())
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/caching/cache_utils.py", line 281, in __call__
+    return self._get_or_create_cached_value(args, kwargs, spinner_message)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/caching/cache_utils.py", line 326, in _get_or_create_cached_value
+    return self._handle_cache_miss(cache, value_key, func_args, func_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/caching/cache_utils.py", line 385, in _handle_cache_miss
+    computed_value = self._info.func(*func_args, **func_kwargs)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/loaders.py", line 98, in load_projection
+    raw_p = pd.read_excel(xl, sheet_name="PROJECTION", header=None)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/pandas/io/excel/_base.py", line 494, in read_excel
+    data = io.parse(
+           ^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/pandas/io/excel/_base.py", line 1780, in parse
+    return self._reader.parse(
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/pandas/io/excel/_base.py", line 753, in parse
+    sheet = self.get_sheet_by_name(asheetname)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/pandas/io/excel/_openpyxl.py", line 589, in get_sheet_by_name
+    self.raise_if_bad_sheet_by_name(name)
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/pandas/io/excel/_base.py", line 605, in raise_if_bad_sheet_by_name
+    raise ValueError(f"Worksheet named '{name}' not found")
+ValueError: Worksheet named 'PROJECTION' not found
+2026-04-08 13:21:11.431 Uncaught app execution
+Traceback (most recent call last):
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+             ^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/app.py", line 184, in <module>
+    main()
+  File "/home/pc/sales-dashboard/app.py", line 176, in main
+    render_month_dashboard("January", prev_month=None)
+  File "/home/pc/sales-dashboard/app.py", line 134, in render_month_dashboard
+    copy_data      = load_copy_report(f_copy.getvalue(), month)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/caching/cache_utils.py", line 281, in __call__
+    return self._get_or_create_cached_value(args, kwargs, spinner_message)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/caching/cache_utils.py", line 326, in _get_or_create_cached_value
+    return self._handle_cache_miss(cache, value_key, func_args, func_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/streamlit/runtime/caching/cache_utils.py", line 385, in _handle_cache_miss
+    computed_value = self._info.func(*func_args, **func_kwargs)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/loaders.py", line 463, in load_copy_report
+    "Remarks": str(row.iloc[15]).strip(),
+                   ~~~~~~~~^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/pandas/core/indexing.py", line 1207, in __getitem__
+    return self._getitem_axis(maybe_callable, axis=axis)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/pandas/core/indexing.py", line 1773, in _getitem_axis
+    self._validate_integer(key, axis)
+  File "/home/pc/sales-dashboard/.venv/lib/python3.12/site-packages/pandas/core/indexing.py", line 1706, in _validate_integer
+    raise IndexError("single positional indexer is out-of-bounds")
+IndexError: single positional indexer is out-of-bounds

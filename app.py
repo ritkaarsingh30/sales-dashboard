@@ -97,18 +97,9 @@ def main():
         st.markdown("### ⚙️ Settings")
         currency = st.radio("Currency Display", ["FCFA", "EUR"], horizontal=True)
         st.markdown("---")
-        st.markdown("### 📁 Upload Files")
-
-        f_sales      = st.file_uploader("Sales File (IVC_SALES…xlsx)",                        type=["xlsx"], key="sales")
-        f_proj       = st.file_uploader("Projection & Activity Plan (IVC_PROJECTION…xlsx)",    type=["xlsx"], key="proj")
-        f_expense    = st.file_uploader("Expense & Activity Sheet (IVC_EXPENSE…xlsx)",          type=["xlsx"], key="expense")
-        f_monthly    = st.file_uploader("Monthly Reports (IVC_MONTHLY…xlsx)",                  type=["xlsx"], key="monthly")
-        f_visits_feb = st.file_uploader("Visit Tracker — Feb (Ivory_coast_visit_tracker…xlsx)", type=["xlsx"], key="visits_feb")
-        f_visits_mar = st.file_uploader("Visit Tracker — Mar (IVC MARCH REPORT.xlsx)",
-                                        type=["xlsx"], key="visits_mar")
-        f_copy       = st.file_uploader("Copy of Report (Copy_of_report…xlsx)",                type=["xlsx"], key="copy")
-        f_tour_plan  = st.file_uploader("Tour Plan (IVC TOUR PLAN VS WORKING AREA.xlsx)",      type=["xlsx"], key="tour_plan")
-
+        st.markdown("### 📁 Master Files")
+        f_sales = st.file_uploader("Sales File (IVC_Sales_Data_2026.xlsx)", type=["xlsx"], key="master_sales")
+        f_copy  = st.file_uploader("Copy of Report (IVC_Copy_Of_Report_2026.xlsx)", type=["xlsx"], key="master_copy")
         st.markdown("---")
         st.markdown(
             '<p style="color:#3a5070;font-size:11px;">'
@@ -116,84 +107,92 @@ def main():
             unsafe_allow_html=True,
         )
 
-    # ── Load Data ──
-    sales_data     = load_sales(f_sales.read())           if f_sales      else None
-    proj_data      = load_projection(f_proj.read())       if f_proj       else None
-    expense_data   = load_expense(f_expense.read())       if f_expense    else None
-    monthly_data   = load_monthly_reports(f_monthly.read()) if f_monthly  else None
-    copy_data      = load_copy_report(f_copy.read())      if f_copy       else None
-    tour_plan_data = load_tour_plan(f_tour_plan.read())   if f_tour_plan  else None
+    def render_month_dashboard(month: str, prev_month: str = None):
+        st.markdown(f"### 📁 Upload {month} Files")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            f_proj = st.file_uploader(f"Projection & Activity Plan", type=["xlsx"], key=f"proj_{month}")
+            f_expense = st.file_uploader(f"Expense & Activity Sheet", type=["xlsx"], key=f"exp_{month}")
+        with col2:
+            f_monthly = st.file_uploader(f"Monthly Reports", type=["xlsx"], key=f"month_{month}")
+            f_visits = st.file_uploader(f"Visit Tracker", type=["xlsx"], key=f"visit_{month}")
+        with col3:
+            f_tour = st.file_uploader(f"Tour Plan", type=["xlsx"], key=f"tour_{month}")
+            
+        if not (f_sales and f_copy and f_proj and f_expense and f_monthly and f_visits and f_tour):
+            st.warning(f"Please upload all Master files (Sidebar) and Monthly files above to view the {month} dashboard.")
+            return
 
-    tracker_inputs = []
-    if f_visits_feb:
-        tracker_inputs.append((f_visits_feb.read(), "Feb"))
-    if f_visits_mar:
-        tracker_inputs.append((f_visits_mar.read(), "Mar"))
-    visit_data = (
-        load_visit_tracker(tracker_inputs) if tracker_inputs
-        else pd.DataFrame(columns=["MR_ID","MR","Doctor","Speciality","Clinic","Visit_Date","Month"])
-    )
+        # ── Load Data ──
+        current_sheet_sales = f"{month[:3].upper()}-26"
+        prev_sheet_sales = f"{prev_month[:3].upper()}-26" if prev_month else None
+        
+        sales_data     = load_sales(f_sales.getvalue(), current_sheet_sales, prev_sheet_sales)
+        proj_data      = load_projection(f_proj.getvalue())
+        expense_data   = load_expense(f_expense.getvalue())
+        monthly_data   = load_monthly_reports(f_monthly.getvalue())
+        copy_data      = load_copy_report(f_copy.getvalue(), month)
+        tour_plan_data = load_tour_plan(f_tour.getvalue())
+        
+        visit_data = load_visit_tracker([(f_visits.getvalue(), month[:3])])
 
-    # Build doctor fuzzy index from visit tracker
-    if not visit_data.empty:
-        build_doctor_index(visit_data["Doctor"].dropna().tolist())
+        # Build doctor fuzzy index from visit tracker
+        if not visit_data.empty:
+            build_doctor_index(visit_data["Doctor"].dropna().tolist())
 
-    # Normalise delegate MR_IDs from monthly report
-    if monthly_data and not monthly_data["delegates"].empty:
-        monthly_data["delegates"]["MR_ID"] = (
-            monthly_data["delegates"]["Delegate"].apply(normalize_mr)
+        # Normalise delegate MR_IDs from monthly report
+        if monthly_data and monthly_data["delegates"] is not None and not monthly_data["delegates"].empty:
+            monthly_data["delegates"]["MR_ID"] = (
+                monthly_data["delegates"]["Delegate"].apply(normalize_mr)
+            )
+
+        # ── Missing-sheet sidebar warning ──
+        all_missing = (
+            proj_data.get("missing_sheets", [])
+            + expense_data.get("missing_sheets", [])
+            + monthly_data.get("missing_sheets", [])
+            + copy_data.get("missing_sheets", [])
         )
+        if all_missing:
+            with st.sidebar:
+                st.markdown("---")
+                st.warning(
+                    "⚠️ **Missing sheets detected:**\n\n"
+                    + "\n".join(f"• `{s}`" for s in all_missing)
+                )
 
-    # ── Tabs ──
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Performance Overview",
-        "🩺 Doctor Spend",
-        "👥 MR Performance",
-        "💼 CM Spend",
-        "📅 Visit Timeline",
-        "💉 Injectable Commission",
-    ])
+        # ── Tabs ──
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "📊 Performance Overview",
+            "🩺 Doctor Spend",
+            "👥 MR Performance",
+            "💼 CM Spend",
+            "📅 Visit Timeline",
+            "💉 Injectable Commission",
+        ])
 
-    with tab1:
-        if sales_data and proj_data and copy_data:
-            render_tab1(sales_data, proj_data, copy_data, currency)
-        else:
-            missing = []
-            if not sales_data:  missing.append("Sales File")
-            if not proj_data:   missing.append("Projection File")
-            if not copy_data:   missing.append("Copy of Report")
-            placeholder_tab("Performance Overview", f"Please upload: {', '.join(missing)}")
+        with tab1:
+            render_tab1(sales_data, proj_data, copy_data, currency, month)
+        with tab2:
+            render_tab2(proj_data, expense_data, copy_data, currency, month)
+        with tab3:
+            render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency, month)
+        with tab4:
+            render_tab4(expense_data, monthly_data, currency, month)
+        with tab5:
+            render_tab5(visit_data, month)
+        with tab6:
+            render_tab6(month)
 
-    with tab2:
-        if proj_data and expense_data:
-            render_tab2(proj_data, expense_data, copy_data or {
-                "product_perf": pd.DataFrame(),
-                "plan_activities": pd.DataFrame(),
-                "actual_activities": pd.DataFrame(),
-            }, currency)
-        else:
-            placeholder_tab("Doctor Spend", "Upload Projection & Activity Plan + Expense files.")
-
-    with tab3:
-        if monthly_data and expense_data:
-            render_tab3(monthly_data, expense_data, visit_data, tour_plan_data, currency)
-        else:
-            placeholder_tab("MR Performance", "Upload Monthly Reports + Expense files.")
-
-    with tab4:
-        if expense_data:
-            render_tab4(expense_data, monthly_data or {
-                "delegates": pd.DataFrame(),
-                "budget_analysis": pd.DataFrame(),
-            }, currency)
-        else:
-            placeholder_tab("CM Spend", "Upload the Expense & Activity Sheet file.")
-
-    with tab5:
-        render_tab5(visit_data)
-
-    with tab6:
-        render_tab6()
+    # Top-level Tabs
+    tab_jan, tab_feb, tab_mar = st.tabs(["January", "February", "March"])
+    
+    with tab_jan:
+        render_month_dashboard("January", prev_month=None)
+    with tab_feb:
+        render_month_dashboard("February", prev_month="January")
+    with tab_mar:
+        render_month_dashboard("March", prev_month="February")
 
 
 if __name__ == "__main__":
